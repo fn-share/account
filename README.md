@@ -7,4 +7,4 @@ Digital account tool of federation knowledge sharing system, powered by NBC Acco
 
 尚在开发中，敬请期待 ...
 
-<a target="_blank" href="goto_site.html?from=github">跳到网站</a>
+<a target="_blank" href="https://fn-share.github.io/account/goto_site.html?from=github">跳到 GitHub Pages 网站</a>
