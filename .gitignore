@@ -1,0 +1,17 @@
+# MAC files
+.DS_Store
+.vscode
+node_modules
+
+# exclude pydep files
+pydep
+pydepends.json
+
+# application exclude files
+data
+dist
+
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml
