@@ -5,9 +5,6 @@ Digital account tool of federation knowledge sharing system, powered by NBC Acco
 
 &nbsp;
 
+[跳转到 GitHub Pages 主页](https://www.fn-share.com/github_bridge?path=index.html)
+
 尚在开发中，敬请期待 ...
-
-<a class="github-button" href="https://github.com/fn-share/account/packages" data-icon="octicon-package" aria-label="Install this package fn-share/account on GitHub">Install this package</a>
-
-<!-- Place this tag in your head or just before your close body tag. -->
-<script async defer src="https://buttons.github.io/buttons.js"></script>
