@@ -3,12 +3,1772 @@
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Digital account tool">
-<meta name="author" content="Red Brick inc. LTD">
+<meta name="description" content="Digital account tool for FNS">
+<meta name="author" content="Federation Knowledge Sharing Research Group">
 <title>Federation Knowledge Account</title>
 <link rel="icon" href="favicon.ico">
+<link href="css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
-Hello, world!
+
+<style>
+.hostcard-item {
+  margin: 0.75rem 0;
+  border: 1px solid white;
+  padding: 0.75rem;
+  border-radius: 0.25rem;
+}
+
+#addcard-auth {
+  width: 50%;
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #212529;
+  background-color: #fff;
+  background-clip: padding-box;
+  border: 1px solid #ced4da;
+  appearance: none;
+  border-radius: 0.25rem;
+}
+
+#addcard-content {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  height: 6rem;
+  border-color: #eee;
+  outline: none;
+  resize: none;
+}
+</style>
+
+<div class="toast fade" role="alert" id="msg-toast" style="position:fixed; left:calc(50vw - 175px); top:10px; background-color:rgba(255,255,255,0.96); z-index:1055">
+  <div class="toast-header">
+    <strong class="me-auto">提示</strong>
+    <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+  </div>
+  <div class="toast-body"></div>
+</div>
+
+<div class="modal" tabindex="-1" id="addcard-modal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">添加卡证</h5>
+        <button type="button" class="btn-close shadow-none" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div>为方便卡证维护，请您设置授权方标记（即，本卡证由谁授权的）。</div>
+        <div class="mt-3"><input type="text" id="addcard-auth" placeholder="授权方"></div>
+        <textarea class="mt-3 rounded-2" id="addcard-content" placeholder="请输入卡证的 16 进制内容字串"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary shadow-none" id="dlg-btn-addcard">添加</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<nav class="navbar navbar-expand-md navbar-dark bg-dark pt-1 pb-0" id="nav-area">
+  <div class="container-fluid">
+    <a class="navbar-brand ps-3 pe-4" href="https://www.fn-share.com" target="_blank" id="brand-name">FNS</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item">
+          <a class="btn nav-link" name="about">关于</a>
+        </li>
+        <li class="nav-item">
+          <a class="btn nav-link" name="hosting">账号</a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<!-- top block: about -->
+<div class="container-lg" name="block-about"><div class="row g-3 mt-2 pt-2 pb-2">
+
+<h2>关于 FNS 账号</h2>
+<p>FNS 账号是适用于联邦知识分享（Federation kNowledge Sharing, FNS）领域的个人账号，它基于 NBC 账号库（NBC Account Library，NAL）构建，是一套支持 DID 自主身份的账号系统。</p>
+<div class="m-2" id="wait-auth-list"></div>
+</div></div>
+
+<!-- top block: hosting -->
+<div class="container-lg d-none" name="block-hosting"><div class="row g-3 mt-2 pt-2 pb-2">
+
+<div class="container-fluid d-none" name="hosting-pre-install">
+  <h2 class="mt-2">NAL 软件尚未缓存</h2>
+  <p class="mt-3">NAL 软件需缓存到本地后，才能提供基于 NBC 账号的相关服务，这些服务将以离线方式提供。</p>
+  <p><button type="button" class="btn btn-primary shadow-none d-none" id="btn-cache-nal">缓存 NAL 软件</button><button class="btn btn-primary" type="button" id="btn-cache-busy" disabled><span class="spinner-border spinner-border-sm" role="status"></span>&nbsp; 加载中 ... </button></p>
+</div>
+
+<div class="container-fluid d-none" name="hosting-pre-restore">
+  <h2 class="mt-2">在本机创建账号</h2>
+  <p class="mt-4">手机号与助记语一起用于推导账号，其中手机号末尾 4 个数字用作缺省的保留字（以后可改）。助词语（即，脑词）是您最难忘，别人又难猜的一句话，请妥善保管助记语，它属于关键机密，恢复账号会用到。</p>
+  <div class="row mt-3">
+    <form class="col-auto" onsubmit="return false" style="width:300px">
+      <input class="form-control mt-3 shadow-none" type="text" autocomplete="username" placeholder="输入手机号" id="login-usr">
+      <input class="form-control mt-3 shadow-none" type="password" autocomplete="current-password" placeholder="设置登录密码" id="login-psw">
+      <input class="form-control mt-3 shadow-none" type="password" autocomplete="off" placeholder="再次输入密码" id="login-psw2">
+      <textarea class="form-control mt-3 shadow-none" placeholder="输入 20 ~ 40 字助记语" id="mnemonic-word"></textarea>
+    </form>
+    <div class="w-100">&nbsp;</div>
+    <div class="col-auto">
+      <p><button type="button" class="btn btn-primary shadow-none ms-1" id="btn-create-acc"><span class="spinner-border spinner-border-sm d-none" role="status"></span> 创建账号 </button></p>
+    </div>
+  </div>
+</div>
+
+<div class="container-fluid d-none" name="hosting-pre-main"><div class="row">
+
+<div class="col-sm-3 col-md-2 col-lg-2 pb-4">
+  <div class="list-group text-center" id="list-tab" role="tablist">
+    <a class="list-group-item list-group-item-action active" id="list-abstract-list" data-bs-toggle="list" href="#list-abstract" role="tab">摘要</a>
+    <a class="list-group-item list-group-item-action" id="list-psw-list" data-bs-toggle="list" href="#list-psw" role="tab">账号密码</a>
+    <a class="list-group-item list-group-item-action" id="list-policy-list" data-bs-toggle="list" href="#list-card" role="tab">卡证列表</a>
+    <a class="list-group-item list-group-item-action" id="list-policy-list" data-bs-toggle="list" href="#list-policy" role="tab">策略定义</a>
+    <a class="list-group-item list-group-item-action" id="list-log-list" data-bs-toggle="list" href="#list-log" role="tab">授权历史</a>
+  </div>
+</div>
+
+<div class="col-sm-9 col-md-10 col-lg-10 pe-3"><div class="tab-content" id="nav-tabContent">
+
+<div class="tab-pane fade show active" id="list-abstract" role="tabpanel">
+<h2 class="mb-4">当前账号</h2>
+<div class="alert alert-primary mb-2 text-break" role="alert">
+<!-- <span id="acc-alter">小号序号：</span><br>
+  <span id="dev-fp">设备指纹：</span><br>  -->
+  <span id="did-fp">根身指纹：</span><br>
+  <span id="did-pub">根身账号：</span><br><br>
+  <span id="real-fp">真身指纹：</span><br>
+  <span id="did-real">真身标识：</span><br>
+  <span id="real-pub">真身账号：</span>
+</div>
+<h2 class="mt-5 mb-4">当前版本</h2>
+<div class="alert alert-primary mb-2 text-break" role="alert">
+  <span id="ver-no">库版本号：</span><br>
+  <span id="ver-size">版本容量：</span><br>
+  <span id="ver-time">安装时间：</span>
+</div>
+<h2 class="mt-5 mb-4">清除 NAL 缓存</h2>
+<p class="mb-3">重装 NAL 软件或重置账号之前需清除缓存，如果您想维持当前账号状态，请不要点击下面按钮。</p>
+<p class="mb-3"><span id="newest-nal-ver"></span></p>
+<p class="mb-4"><button type="button" class="btn btn-primary" id="btn-rmv-cache">清除 NAL 软件缓存</button></p>
+</div>  <!-- end of #list-abstract  -->
+
+<div class="tab-pane fade" id="list-psw" role="tabpanel">
+<h2 class="mb-4">验证保留字</h2>
+<p>点击下面按钮系统将发起保留字验证，如果选错保留字，系统将立即上锁，您需刷新网页并输密码来解锁。提示：借助选错保留字，您可以让系统临时上锁。</p>
+<div class="mt-4 mb-4"><button type="button" class="btn btn-primary" id="btn-verify-rsvd">验证保留字</button></div>
+
+<h2 class="mt-5 mb-4">修改账号</h2>
+<form onsubmit="return false">
+<div class="input-group mb-3" style="width:300px">
+  <span class="input-group-text">当前密码</span>
+  <input type="password" class="form-control" placeholder="输入密码用于操作授权" autocomplete="off" id="input-mod-psw">
+</div>
+<div class="input-group mb-3" style="width:300px">
+  <span class="input-group-text">新设密码</span>
+  <input type="password" class="form-control" placeholder="缺省空值表示不改密码" autocomplete="off" id="input-mod-psw2">
+</div>
+<div class="input-group mb-3" style="width:300px">
+  <span class="input-group-text">再输密码</span>
+  <input type="password" class="form-control" placeholder="请再次输入新设密码" autocomplete="off" id="input-mod-psw3">
+</div>
+<div class="input-group mb-3" style="width:300px">
+  <span class="input-group-text">新保留字</span>
+  <input type="text" class="form-control" placeholder="3~5 个数字或英文字母" autocomplete="off" id="input-mod-rsvd">
+</div>
+</form>
+<div class="mt-4 mb-2"><button type="button" class="btn btn-primary" id="btn-modi-acc">提交更改</button> &nbsp; <button type="button" class="btn btn-primary d-none" id="btn-rollback-acc">回退</button> &nbsp; <button type="button" class="btn btn-primary d-none" id="btn-renew-real">再次同步</button></div>
+<p class="mb-4" style="color:red" id="hint-modi-acc"></p>
+
+<h2 class="mt-5 mb-4">设置加密服务点查询 URL</h2>
+<p class="mb-4">加密服务点查询 URL 用于让客户端机器发起请求获得加密服务点地址，申请绿卡需由加密服务点提供服务，本项取空值表示使用 NAL 官方提供的缺省服务。</p>
+<div class="input-group mb-3" style="width:340px">
+  <span class="input-group-text">URL</span>
+  <input type="text" class="form-control text-truncate" autocomplete="off" id="input-cryptohost">
+</div>
+<div>
+<div class="mb-3"><button type="button" class="btn btn-primary" id="btn-set-cryptohost">提交更改</button></div>
+</div>
+</div>  <!-- end of #list-psw -->
+
+<div class="tab-pane fade" id="list-card" role="tabpanel">
+<h2 class="mb-4">卡证列表</h2>
+<div class="list-group mt-5 d-none" role="tablist" id="hostcard-table-area"></div>
+<div class="mt-3 d-none" style="height: 3rem;" id="hostcard-page-area">
+  <nav class="float-start pe-2"><ul class="pagination"></ul></nav>
+</div>
+<div class="alert alert-primary text-break mt-3 d-none" role="alert" id="hostcard-info-area"></div>
+<div class="mt-3 mb-3 d-none" id="hostcard-op-area">
+  <input type='text' style="width:10px; opacity:0; user-select:none;" id="edt-card-ctx" readonly>
+  <button type="button" class="btn btn-success" id="btn-add-card">添加卡证</button>
+</div>
+</div>
+
+<div class="tab-pane fade" id="list-policy" role="tabpanel">
+<h2 class="mb-4">策略定义</h2>
+<div class="list-group mt-5 d-none" role="tablist" id="website-table-area"></div>
+<div class="mt-3 d-none" style="height: 3rem;" id="website-page-area">
+  <nav class="float-end pe-2"><ul class="pagination"></ul></nav>
+</div>
+<div class="alert alert-primary text-break mt-3 d-none" role="alert" id="website-info-area"></div>
+</div>
+
+<div class="tab-pane fade" id="list-log" role="tabpanel">
+<h2 class="mb-4">授权历史</h2>
+<div class="d-none mt-5" id="no-signlist-area">
+  <p class="mb-3">尚无授权项目。</p>
+  <p><button type="button" class="btn btn-success shadow-none" id="btn-refresh-signlist">刷新</button></p>
+</div>
+<div class="list-group mt-5 d-none" role="tablist" id="signlist-table-area"></div>
+<div class="mt-3 d-none" style="height: 3rem;" id="signlist-page-area">
+  <nav class="float-end pe-2"><ul class="pagination"></ul></nav>
+</div>
+<div class="alert alert-primary text-break mt-3 d-none" role="alert" id="signlist-info-area"></div>
+</div>
+
+</div></div>  <!-- end of <div><div.tab-content>  -->
+</div></div>  <!-- end of <div.container-fluid><div.row>  -->
+
+</div></div>  <!-- end of <div.container[block-hosting]><div.row>  -->
+
+<iframe style="display:none" data-src="api/last/bridge.html" id="nbc-account"></iframe>
+
+<div class="d-none"><input type="file" id="file_selector"></div>
+
+<script src="js/jquery-3.6.0.slim.min.js"></script>
+<script src="js/popper.min.js"></script>
+<script src="js/bootstrap.min.js"></script>
+
+<script src="api/0/nbc_base-0.1.min.js"></script>
+
+<script>
+const NAL = ( function() {
+
+var sw_call_idx_ = 0;
+var sw_call_buf_ = []; // waiting buffer for NAL_.call_()
+
+var app_version_  = null;
+var app_abnormal_ = '';
+
+var sw_magic_ = null;
+var sw_channel_ = {};  // { strategy_ver, host }
+
+var sw_notifies_ = {
+  ver_info(param) {
+    app_version_ = param[0];
+    if (app_version_ === null)
+      app_abnormal_ = param[1]+''; // can be: none, installing, installed, activating, activated, redundant
+    else app_abnormal_ = '';
+  },
+};
+
+window.addEventListener('message', function(ev) {
+  if (ev.source !== accFrameNode.contentWindow) {
+    if (ev.data.slice(0,10) == 'CHAN_INFO:') {
+      let s = ev.data.slice(10);
+      let idx = s.indexOf(':');
+      if (idx > 0) {
+        sw_magic_ = parseInt(s.slice(0,idx)) || 0;
+        try {
+          sw_channel_ = JSON.parse(s.slice(idx+1));
+        }
+        catch(e) {
+          console.log(e);
+        }
+      }
+    }
+    return;
+  }
+  
+  let msg = JSON.parse(ev.data), msg_id = msg.id;
+  if (typeof msg_id == 'number') {
+    for (let i=0,item; item=sw_call_buf_[i]; i++) {
+      if (item[0] === msg_id) {
+        sw_call_buf_.splice(i,1); // remove from calling buffer
+        if (typeof msg.error == 'string')
+          item[2](new Error(msg.error)); // reject(err)
+        else item[1](msg);        // resove({id,result})
+        break;
+      }
+    }
+  }
+  else if (typeof msg.notify == 'string') {
+    let fn = sw_notifies_[msg.notify];
+    if (fn) fn(msg.param || []);
+  }
+});
+
+let accFrameNode = document.querySelector('#nbc-account');
+if (!accFrameNode || accFrameNode.nodeName != 'IFRAME') {
+  accFrameNode = document.createElement('iframe');
+  accFrameNode.setAttribute('id','nbc-account');
+  accFrameNode.setAttribute('style','display:none');
+  accFrameNode.setAttribute('src','/account/api/last/bridge.html');
+  document.body.appendChild(accFrameNode);
+}
+else accFrameNode.setAttribute('src',accFrameNode.dataset.src); // assign src after message listen started
+
+let NAL_ = {
+  verInfo(info) { // reconstruct json to avoid side effects
+    if (info) {
+      app_version_ = JSON.parse(JSON.stringify(info));
+      app_abnormal_ = '';
+    }
+    return app_version_? JSON.parse(JSON.stringify(app_version_)): null;
+  },
+  
+  swMagic(magic, callback) {
+    if (magic === undefined)
+      return sw_magic_;
+    
+    sw_magic_ = null;
+    if (magic === null)
+      return null;
+    
+    let nd = document.createElement('a');
+    nd.setAttribute('href',accFrameNode.getAttribute('src'));
+    let loc = nd.origin + '/account/api/online/regist_magic?magic=' + magic;
+    let frmNode = document.createElement('iframe');
+    frmNode.setAttribute('style','display:none');
+    frmNode.setAttribute('src',loc);
+    document.body.appendChild(frmNode);
+    
+    let counter = 0;
+    let tid = setInterval( () => {
+      counter += 1;
+      if (sw_magic_ !== null || counter > 30) {  // max wait 9 seconds
+        clearInterval(tid);
+        frmNode.remove();
+        if (callback) callback(sw_magic_);
+      }
+    }, 300);
+  },
+  
+  swHost() {
+    return sw_channel_.host || 'account.nb-chain.cn';
+  },
+  
+  strategyVer() {
+    return sw_channel_.strategy_ver || 0;
+  },
+  
+  waitReady(wait) {
+    let resolve_fn = null, reject_fn = null;
+    let wait_ready = new Promise( (resolve,reject) => {
+      resolve_fn = resolve;
+      reject_fn = reject;
+    });
+    
+    let waitNum = wait || 60;  // default wait 60 seconds
+    let ticks = 0, tid = setInterval( () => {
+      if (app_version_) {
+        app_abnormal_ = '';
+        clearInterval(tid);
+        resolve_fn(NAL_.verInfo());
+      }
+      else {
+        if (app_abnormal_) { // state changed
+          clearInterval(tid);
+          resolve_fn(app_abnormal_);
+        }
+        else {
+          ticks += 1;
+          if (ticks > waitNum) {
+            clearInterval(tid);
+            reject_fn(new Error('TIMEOUT'));
+          }
+          // else, continue checking
+        }
+      }
+    }, 1000);
+    
+    return wait_ready;
+  },
+  
+  renewState() {
+    // renew bridge state, auto cache NAL if nesseary, wait ready for restore hosting
+    accFrameNode.contentWindow.postMessage('RENEW','*');
+  },
+  
+  unregist() {
+    navigator.serviceWorker.getRegistrations().then( items => {
+      let reg = null;
+      for (let i=0,item; item=items[i]; i++) {
+        if (item.active && item.active.scriptURL.indexOf('/account/api/sw-') > 0) {
+          reg = item;
+          break;
+        }
+      }
+      if (!reg) {
+        console.log('no active SW found.');
+        return;
+      }
+      
+      if (app_version_) {
+        NAL_.call_('clear_cache').then( res => {
+          console.log('clear cache ' + res);
+          tryUnregist(reg);
+        });
+      }
+      else tryUnregist(reg);
+    });
+    
+    function tryUnregist(reg) {
+      reg.unregister().then( is_succ => {
+        if (is_succ)
+          alert('已提交 service worker 注销操作，请重启浏览器使之生效。');
+        else alert('注销 service worker 失败');
+      });
+    }
+  },
+  
+  registNoti(name, callback) {  // callback(param), when callback is null means remove
+    if (callback === null)
+      delete sw_notifies_[name];
+    else sw_notifies_[name] = callback;
+  },
+  
+  call_(cmd, param, wait) {
+    if (sw_call_buf_.length > 16) throw Error('SW_CALL_BUSY');
+    
+    sw_call_idx_ += 1;
+    let new_id = sw_call_idx_;
+    let msg_caller = new Promise( (resolve,reject) => {
+      sw_call_buf_.push([new_id,resolve,reject])
+    });
+    
+    if (!param) param = [];
+    accFrameNode.contentWindow.postMessage(JSON.stringify({id:new_id,cmd,param}),'*');
+    
+    let abort_fn = null;
+    let abortable = Promise.race([ msg_caller,
+      new Promise( function(resolve, reject) {
+        abort_fn = function() { reject(new Error('TIMEOUT')) };
+      })
+    ]);
+    setTimeout(()=>abort_fn(),wait||5000); // default wait 5 seconds
+    
+    return abortable.then( res => res.result, e => {
+      for (let i=0,item; item=sw_call_buf_[i]; i++) {
+        if (item[0] == new_id) {
+          sw_call_buf_.splice(i,1);  // remove from calling buffer
+          break;
+        }
+      }
+      return e.message || 'UNKNOWN'; // maybe 'TIMEOUT', maybe res.error
+    });
+  },
+};
+
+return NAL_;
+})();
+
+NAL.dialog = ( () => {
+
+let inShowing = false;
+
+function noResponse(e) {
+  e.stopPropagation();
+}
+
+let maskNode = (() => {
+  let node = document.querySelector('#nal-mask');
+  if (!node) {
+    node = document.createElement('div');
+    node.setAttribute('id','nal-mask');
+    node.setAttribute('style','display:none; background:rgba(0,0,0,0.5); position:fixed; z-index:1056; left:0; top:0; right:0; bottom:0; padding:0; margin:0; border-width:0;');
+    node.onclick = node.ondblclick = node.onmousedown = node.ontouchstart = noResponse;
+    document.body.appendChild(node);
+  }
+  return node;
+})();
+
+function closeDialog() {
+  document.querySelectorAll('#nal-mask > div[name^="dlg-"]').forEach( node => {
+    node.style.display = 'none';
+  });
+  maskNode.style.display = 'none';
+  inShowing = false;
+}
+
+let nalDialogResolve = null, nalDialogReject = null; // hide here for security
+let nalCheckPassId = 0;
+
+return ( (name,args) => {
+  if (!name) return inShowing;  // query in showing or not
+  
+  if (inShowing) {
+    return new Promise( function(resolve, reject) {
+      reject(new Error('SYSTEM_BUSY'));
+    });
+  }
+  
+  let task = new Promise( function(resolve, reject) {
+    nalDialogResolve = resolve; // affects history task, it is safe since only one dialog in showing always
+    nalDialogReject = reject;
+  });
+  let dialog = null, startupFn = null;
+  
+  if (name == 'pass') {
+    let pswDialog = maskNode.querySelector('div[name="dlg-pass"]');
+    if (!pswDialog) {
+      pswDialog = document.createElement('div');
+      pswDialog.setAttribute('name','dlg-pass');
+      pswDialog.setAttribute('style','display:none; background:white; position:relative; width:400px; left:calc(50% - 200px); top:68px; border-radius:0.25rem;');
+      pswDialog.innerHTML = '<div style="height:4.5rem"><span style="display:inline-block; float:left; margin:1.25rem; font-size:1.25rem; font-weight:500;">请输入 NBC 账号密码</span><button name="btn-cancel" style="display:inline-block; border-width:0; background-color:#fff; font-size:2.25rem; font-weight:200; color:#000; opacity:0.5; float:right; margin:0 8px;">&times;</button></div><div style="border:solid rgba(0,0,0,0.2); border-width:1px 0; padding:1.25rem;"><form onsubmit="return false"><input type="password" style="width:280px; outline:none; padding:0.375rem 0.75rem; color:#212529; font-size:1rem; font-weight:400; line-height:1.5; background-clip:padding-box; background-color:#fff; border:1px solid #ced4da; appearance:none; border-radius:0.25rem;" placeholder="密码长度需超过 6 个字符" autocomplete="off"></form></div><div style="padding:0.75rem 1.25rem 1rem; text-align:right; user-select:none; font-size:1rem; line-height:1.5;"><button name="btn-confirm" style="border:1px solid transparent; margin:0.25rem; padding:0.375rem 0.75rem; text-align:center; color:#fff; background-color:#0d6efd; border-color:#0d6efd; border-radius:0.25rem;">确定</button></div>';
+      maskNode.appendChild(pswDialog);
+      
+      let node = pswDialog.querySelector('input[type="password"]');
+      node.onkeypress = ( ev => {
+        if (ev.keyCode == 13) {
+          let s = ev.target.value;
+          if (s.length < 6) return alert('密码长度未满足要求');
+          
+          ev.target.value = '';
+          closeDialog();
+          nalDialogResolve(s);
+        }
+      });
+      
+      node = pswDialog.querySelector('button[name="btn-cancel"]');
+      node.onmouseover = (ev => ev.target.style.opacity = '1');
+      node.onmouseout = (ev => ev.target.style.opacity = '0.5');
+      node.onclick = ( ev => {
+        pswDialog.querySelector('input[type="password"]').value = '';
+        closeDialog();
+        nalDialogReject(new Error('CANCELED'));
+      });
+      
+      node = pswDialog.querySelector('button[name="btn-confirm"]');
+      node.onmouseover = (ev => ev.target.style.opacity = '0.8');
+      node.onmouseout = (ev => ev.target.style.opacity = '1');
+      node.onclick = ( ev => {
+        let edt = pswDialog.querySelector('input[type="password"]');
+        let s = edt.value;
+        if (s.length < 6) return alert('密码长度未满足要求');
+        
+        edt.value = '';
+        closeDialog();
+        nalDialogResolve(s);
+      });
+    }
+    
+    dialog = pswDialog;
+    startupFn = (() => pswDialog.querySelector('input[type="password"]').focus());
+  }
+  
+  else if (name == 'rsvd') {
+    if (!args.length) return null; // fatal error, should not happen
+    let rsvdDialog = maskNode.querySelector('div[name="dlg-rsvd"]');
+    if (!rsvdDialog) {
+      rsvdDialog = document.createElement('div');
+      rsvdDialog.setAttribute('name','dlg-rsvd');
+      rsvdDialog.setAttribute('style','display:none; background:white; position:relative; width:300px; left:calc(50% - 150px); top:68px; border-radius:0.25rem;');
+      rsvdDialog.innerHTML = '<div style="height:4.5rem"><span style="display:inline-block; float:left; margin:1.25rem; font-size:1.25rem; font-weight:500;">请选择保留字</span><button name="btn-cancel" style="display:inline-block; border-width:0; background-color:#fff; font-size:2.25rem; font-weight:200; color:#000; opacity:0.5; float:right; margin:0 8px;">&times;</button></div><div name="rsvd-body" style="border:solid rgba(0,0,0,0.2); border-width:1px 0 0; padding:1.25rem 0 2rem; user-select:none; font-family:monospace; font-size:1rem; line-height:1.5; text-align:center;"></div>';
+      maskNode.appendChild(rsvdDialog);
+      
+      let node = rsvdDialog.querySelector('button[name="btn-cancel"]');
+      node.onmouseover = (ev => ev.target.style.opacity = '1');
+      node.onmouseout = (ev => ev.target.style.opacity = '0.5');
+      node.onclick = ( ev => {
+        closeDialog();
+        nalDialogReject(new Error('CANCELED'));
+      });
+      
+      node = rsvdDialog.querySelector('div[name="rsvd-body"]');
+      let btn = document.createElement('button');
+      btn.setAttribute('style','border:1px solid transparent; margin:0.25rem 0.5rem; padding:0.5rem 0.75rem; color:#fff; background-color:#198754; border-color:#198754; border-radius:1.5rem;');
+      
+      let i = 0, btn2 = btn;
+      while (true) {
+        btn2.innerHTML = args[i] || ''; // 3~5 number, no need escape
+        btn2.onmouseover = rsvdMouseOver;
+        btn2.onmouseout = rsvdMouseOut;
+        btn2.onclick = rsvdSelected;
+        node.appendChild(btn2);
+        
+        if (i == 2 || i == 5)
+          node.appendChild(document.createElement('br'));
+        
+        i += 1;
+        if (i >= 9) break;
+        btn2 = btn.cloneNode(false);
+      }
+      
+      function rsvdMouseOver(ev) {
+        ev.target.style.opacity = '0.8';
+      }
+      function rsvdMouseOut(ev) {
+        ev.target.style.opacity = '1';
+      }
+      function rsvdSelected(ev) {
+        let ret = ev.target.innerHTML; // 3~5 number
+        closeDialog();
+        nalDialogResolve(ret);
+      }
+    }
+    else {
+      let items = rsvdDialog.querySelectorAll('div[name="rsvd-body"] > button');
+      args.forEach( (item,idx) => {
+        if (idx < items.length) items[idx].innerHTML = item;
+      });
+    }
+    
+    dialog = rsvdDialog;
+  }
+  
+  if (!dialog) return null;
+  
+  inShowing = true;
+  maskNode.style.display = 'block';
+  dialog.style.display = 'block';
+  if (startupFn) startupFn();
+  
+  return task;
+});   // end of return xx
+
+})(); // assign to NAL.dialog
+
+NAL.call = function(cmd, param, wait) {
+  return NAL.call_(cmd,param,wait).then( res => {
+    if (res === 'WAIT_PASS')
+      return passAndCall(1);
+    else return res;
+  });
+  
+  function passAndCall(counter) {
+    return NAL.dialog('pass').then( psw => {
+      return NAL.call_('config_acc',[psw]).then( res => {
+        if (res === 'OK')
+          return NAL.call_(cmd,param,wait);
+        else if (res === 'WAIT_PASS') {
+          if (counter >= 3)  // max try 3 times
+            throw Error('PASSWORD_ERROR');
+          return passAndCall(counter+1);
+        }
+        else throw Error('SYS_NOT_READY');
+      });
+    });  // throw Error('CANCELED') when inputting psw canceled
+  }
+};
+</script>
+
+<script>
+const ECDH = require('create-ecdh')('secp256k1');
+const CryptoJS = require('crypto-js');
+const CreateHash = require('create-hash');
+const Buffer = require('safe-buffer').Buffer;
+const bip32 = require('bip32');
+
+const secp256k_order = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
+
+function htmlEscape(text) { 
+  return text.replace(/[<>"&]/g, function(match, pos, originalText) { // "
+    if (match == '<')
+      return '&lt;';
+    else if (match == '>')
+      return '&gt;';
+    else if (match == '&')
+      return '&amp;';
+    else if (match == '"')
+      return '&quot;';
+  });
+}
+
+function wait__(promise_obj, wait) {
+  let abort_fn = null;
+  let abortable_promise = Promise.race([ promise_obj,
+    new Promise( function(resolve, reject) {
+      abort_fn = function() { reject(new Error('TIMEOUT')) };
+    })
+  ]);
+  
+  setTimeout(()=>abort_fn(),wait);
+  return abortable_promise;
+}
+
+function url_fetch(url, callback, options, timeout) {
+  wait__(fetch(url,options),timeout || 30000).then( res => {
+    if (res.status == 200)
+      return res.json();
+    else return null;   // ignore other res.status
+  }, e => null ).then( data => {
+    if (callback) callback(data);  // data can be null
+  });
+}
+
+function generateRand(num) {
+  let ret = Buffer.alloc(num,0);
+  for (let i=0; i < num; i++) {
+    ret[i] = Math.floor(Math.random() * 256);  // 0 ~ 255
+  }
+  return ret;
+}
+
+function gen_ecdh_key(pubkey33, re_gen) {
+  // ECDH.setPrivateKey(big.numToBuf(bigN));  // for debuging
+  if (re_gen) ECDH.generateKeys();
+  
+  let pubKeyPoint = ECDH.getPublicKey();
+  let nonce_x = pubKeyPoint.slice(1,33);  // nonce_y = pubKeyPoint.slice(33,65)
+  let flag = pubKeyPoint[64] & 0x01;
+  let targ_x = ECDH.computeSecret(pubkey33);
+  return [flag, nonce_x, targ_x];
+}
+
+function wrapCryptoBuf(msg) {
+  if (msg.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
+    return msg;
+  else if (msg.buffer instanceof ArrayBuffer)  // msg is instance of Buffer
+    return CryptoJS.lib.WordArray.create(msg);
+  else return CryptoJS.enc.Utf8.parse(msg);    // assume msg is utf-8 string
+}
+
+function AesCbcEncrypt(prv, iv, msg) {
+  prv = wrapCryptoBuf(prv);
+  iv = wrapCryptoBuf(iv);
+  msg = wrapCryptoBuf(msg);
+  
+  let encrypted = CryptoJS.AES.encrypt(msg, prv, {
+    iv: iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.ZeroPadding
+  });
+  // encrypted.toString() is base64-string, encrypted.ciphertext.toString() is hex-string
+  return encrypted.ciphertext;  // return CryptoJS.lib.WordArray
+}
+
+function AesCbcDecrypt(prv, iv, msg) { // msg must be base64 string
+  prv = wrapCryptoBuf(prv);
+  iv = wrapCryptoBuf(iv);
+  
+  return CryptoJS.AES.decrypt(msg, prv, {
+    iv: iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.NoPadding  // CryptoJS.pad.ZeroPadding
+  });  // return CryptoJS.lib.WordArray
+}
+
+function encryptMsg(k_iv, msg) {
+  return AesCbcEncrypt(k_iv.slice(0,16),k_iv.slice(16,32),msg);
+}
+
+function hash256_d(s) { // make double hash, s is utf-8 string or Buffer
+  if (!(s instanceof Buffer)) {
+    if (typeof s != 'string') s = s + '';
+    s = Buffer.from(s,'utf-8');
+  }
+  return CreateHash('sha256').update(CreateHash('sha256').update(s).digest()).digest();
+}
+
+function ripemdHash(buf) {
+  let ha = CreateHash('sha256').update(buf).digest();
+  return CreateHash('ripemd160').update(ha).digest();
+}
+
+//----
+
+var holding_sw_id = 0;
+
+function holdingSW() {
+  if (holding_sw_id) clearInterval(holding_sw_id);
+  
+  let authList = $('#wait-auth-list');
+  holding_sw_id = setInterval( () => {
+    NAL.call_('list_wait_sign',[NAL.swHost(),NAL.swMagic()]).then( res => {
+      if (res === 'WAIT_PASS') {
+        if (authList.find('.card[name="WAIT_PASS"]').length == 0) {
+          authList.html('<div class="card m-1" name="WAIT_PASS" style="width:22rem"><div class="card-body"><h5 class="card-title">account.nb-chain.cn</h5><p class="card-text"><span>授权给: </span><code>pass</code></p><form onsubmit="return false"><input class="form-control form-control-md mt-3" type="password" autocomplete="off" placeholder="输入密码并击回车" style="width:16rem"></form></div></div>');
+          authList.find('input[type="password"]').on('keypress', ev => {
+            if (ev.keyCode == 13) {
+              let psw = $(ev.target).val();
+              if (!psw) return alert('密码不能为空');
+              NAL.call_('config_acc',[psw]).then( res => {
+                if (res === 'WAIT_PASS') return alert('密码不正确');
+                if (res === 'OK') authList.html('');
+              });
+            }
+          });
+        }
+      }
+      else if (res instanceof Array) {
+        let waitItems = res;
+        if (!waitItems.length)
+          authList.html('');
+        else {
+          waitItems.forEach( (item,idx) => {
+            if (!item || !item.host) return;
+            if (authList.find('.card[name="'+item.host+'"]').length == 0) {
+              let node = $(`<div class="card m-1" name="${item.host}" style="width:22rem"><div class="card-body"><h5 class="card-title">${item.host} <button type="button" class="btn-close shadow-none" style="float:right;width:0.5em;height:0.5em"></button></h5><p class="card-text"><span>授权给: </span><code>${item.realm}</code></p><form onsubmit="return false"><input class="form-control form-control-md mt-3" type="password" autocomplete="off" placeholder="输入密码并击回车" style="width:16rem"></form></div></div>`);
+              authList.append(node);
+              node.find('input[type="password"]').on('keypress', ev => {
+                if (ev.keyCode == 13) {
+                  let nd = $(ev.target);
+                  let psw = nd.val();
+                  if (!psw) return alert('密码不能为空');
+                  
+                  let targHost = nd.parents('.card').attr('name');
+                  if (!targHost) return;
+                  
+                  NAL.call_('do_wait_sign',[psw,NAL.swHost(),NAL.swMagic(),targHost]).then( res => {
+                    if (typeof res == 'string') {
+                      if (res == 'WAIT_PASS') return alert('密码不正确');
+                      if (res == 'OK')
+                        authList.html('');
+                      else console.log('meet error:' + res);
+                    }
+                  });
+                }
+              });
+              
+              node.find('button').on('click', ev => {
+                let targHost = $(ev.target).parents('.card').attr('name');
+                if (!targHost) return;
+                NAL.call('rmv_wait_sign',[NAL.swHost(),NAL.swMagic(),targHost]).then( res => {
+                  if (typeof res == 'string') {
+                    if (res == 'OK')
+                      authList.html('');
+                    else console.log('meet error:' + res);
+                  }
+                });
+              });
+            }
+          });
+          
+          authList.find('.card').each( (idx,node) => {
+            node = $(node);
+            let name = node.attr('name');
+            if (!waitItems.find(x => name === x.host))
+              node.remove();  // slient remove no using node
+          });
+        }
+      }
+    }).catch( e => {
+      console.log(e);
+      clearInterval(holding_sw_id);
+      holding_sw_id = 0;
+    });
+  }, 2500);  // run every 2.5 seconds
+}
+
+function unholdSW() {
+  if (holding_sw_id) {
+    clearInterval(holding_sw_id);
+    holding_sw_id = 0;
+  }
+}
+
+function showInstallBusy(isBusy) {
+  $('#btn-cache-nal').toggleClass('d-none',isBusy);
+  $('#btn-cache-busy').toggleClass('d-none',!isBusy);
+}
+
+var _currRealIdx = null;
+var _currAlterOff = 0;
+
+function getRealIndex(callback) {
+  if (_currRealIdx !== null)
+    return callback(_currRealIdx);
+  
+  NAL.call_('get_realidx',[NAL.swHost(),NAL.swMagic()]).then( res => {
+    if (typeof res == 'string')
+      _currRealIdx = null;
+    else _currRealIdx = res.real_idx;
+    callback(_currRealIdx);
+  });
+}
+
+function showHostingTask(task) {
+  let targName = 'hosting-pre-' + task;
+  let nodes = $('body > div[name="block-hosting"]').find('div[name^="hosting-pre-"]');
+  nodes.each( (idx,node) => {
+    const nd = $(node);
+    nd.toggleClass('d-none',nd.attr('name') != targName);
+  });
+  
+  if (task == 'main') {
+    NAL.swMagic(parseInt(generateRand(6).toString('hex'),16), magic => {
+      if (typeof magic != 'number')
+        return alert('申请 service worker 事务 ID 出错');
+
+      NAL.call('acc_summary',[NAL.swHost(),magic],20000).then( res => {
+        if (typeof res == 'string')
+          alert('查询账号失败：' + res);
+        else showAccount(res);
+      });
+    });
+  }
+  
+  function showAccount(info) {
+    // step 1: show account info
+    _currRealIdx  = info.real_idx;
+    _currAlterOff = info.alternate_off || 0;
+    
+    wait__(fetch('/account/api/version.txt'),30000).then( res => {
+      if (res.status != 200)
+        throw new Error('FETCH_FAILED');
+      else return res.text();
+    }).then( ver => {
+      $('#newest-nal-ver').text(`当前最新 NAL 版本为 v${ver}。`);
+    }).catch(e => console.log(e));
+    
+    NAL.call_('crypto_host_url',[NAL.swHost(),NAL.swMagic()]).then( res => {
+      if (res && res.url)
+        $('#input-cryptohost').val(res.url);
+    });
+    
+    // $('#acc-alter').text('小号序号：' + info.alternate_off);
+    // $('#dev-fp').text('设备指纹：' + info.figerprint);  // DEV-ACC
+    $('#did-fp').text('根身指纹：' + info.did_figerprint); // ALT-ACC
+    $('#did-pub').text('根身账号：' + info.did_pubkey);    // ALT-ACC
+    $('#did-real').text('真身标识：' + info.did_realid);   // alt/0/0
+    $('#real-fp').text('真身指纹：' + info.real_figerprint);
+    $('#real-pub').text('真身账号：' + info.real_pubkey);
+    
+    let tm = new Date(info.install_time * 1000);
+    $('#ver-no').text('库版本号：NAL v' + info.ver);
+    $('#ver-size').text('版本容量：' + info.pkg_size + ' 字节');
+    $('#ver-time').text('安装时间：' + tm.toLocaleString());
+    
+    // step 2: start app
+    initAppLayer();
+  }
+}
+
+function checkPhoneNo(sPhone) {
+  if (sPhone.search(/^\d+$/) == -1 || sPhone.length <= 10 || sPhone.length >= 15 || sPhone[0] != '1')
+    return false;
+  else return true;
+}
+
+function tempDisableBtn(targ) {
+  if (!targ) return;
+  let node = $(targ);
+  node.attr('disabled',true); // temporary disable button to avoid second-click
+  setTimeout( () => node.attr('disabled',false), 2000);
+}
+
+var all_nav_items = $('#navbarSupportedContent .nav-link');
+
+function _navClick(navName) {
+  if (!navName) return;
+  
+  $('body > div[name^="block-"]').each( (idx,node) => {
+    node = $(node);
+    if (node.attr('name') == 'block-'+navName)
+      node.removeClass('d-none');
+    else node.addClass('d-none');
+  });
+  
+  all_nav_items.each( (idx,node) => {
+    node = $(node);
+    if (node.attr('name') === navName)
+      node.addClass('active');
+    else node.removeClass('active');
+  });
+}
+
+function createAccount(targBtn) {
+  if (!NAL.verInfo())
+    return alert('NAL 未就绪');
+  
+  // step 1: prepare phone, mnemonic, password
+  let mnemonic = $('#mnemonic-word').val();
+  mnemonic = Buffer.from(mnemonic);
+  if (mnemonic.length < 12)
+    return alert('助记词太短');
+  
+  let phoneNo = $('#login-usr').val().trim();
+  if (!checkPhoneNo(phoneNo))
+    return alert('手机号格式错误');
+  let psw = $('#login-psw').val();
+  let psw2 = $('#login-psw2').val();
+  if (psw !== psw2)
+    return alert('两次输入密码不一致');
+  if (psw.length < 6)
+    return alert('密码格式错误：密码长度要求超过 6');
+  
+  let loadingEle = $(targBtn).find('span.spinner-border');
+  loadingEle.removeClass('d-none');  // show busy
+  
+  // step 2: create DEV-ACC
+  let ha = CreateHash('sha256').update(mnemonic).digest();
+  let devBip = bip32.fromSeed(Buffer.concat([Buffer.from(phoneNo+':'),ha]));
+  
+  // step 3: create PSW-ACC
+  let devPsw = Buffer.concat([devBip.publicKey,Buffer.from(psw)]);
+  ha = CreateHash('sha256').update(devPsw).digest();
+  let intensive = CreateHash('sha512').update(ha).digest();  // 64 bytes
+  
+  let n = BigInt('0x' + devBip.privateKey.toString('hex'));
+  n = (n + BigInt('0x' + intensive.slice(32,64).toString('hex'))) % secp256k_order;
+  if (n === 0n) {  // very seldom, but it would happen
+    loadingEle.addClass('d-none');
+    return alert('推导账号出错');
+  }
+  
+  n = n.toString(16);
+  if (n.length & 0x01) n = '0' + n;
+  n = Buffer.from(n,'hex');  // n = priv + intensive[:32]
+  let pswPriv = Buffer.alloc(32,0);
+  n.copy(pswPriv,32 - n.length,0);  // copy(targBuffer,targStart,sourStart,sourEnd)
+  
+  let halfChain1 = devBip.chainCode.slice(16,32);
+  let halfChain2 = CreateHash('sha256').update(Buffer.from(phoneNo)).update(intensive.slice(32,64)).digest().slice(0,16);
+  let pswBip = bip32.fromPrivateKey(pswPriv,Buffer.concat([halfChain1,halfChain2]));
+  pswBip = pswBip.derive(0x80000000);
+  
+  // step 4: create ALT-ACC
+  let ha2 = CreateHash('sha256').update(Buffer.from('DID_CHILD:'));
+  ha2 = ha2.update(devBip.privateKey.slice(0,16)).digest().slice(0,4);
+  let alternate_no = parseInt(ha2.toString('hex'),16) + 0; // alternate_off is fixed to 0
+  if (alternate_no < 0x80000000)  // can not use `did_child | 0x80000000`
+    alternate_no = 0x80000000 + alternate_no;
+  let altBip = devBip.derive(alternate_no);
+  let altHa = Buffer.concat([Buffer.from('NBC_DID:'+phoneNo+':'),altBip.publicKey]);
+  altHa = CreateHash('sha256').update(CreateHash('sha256').update(altHa).digest()).digest();
+  
+  // step 5: save account to SW
+  let figerprint = ripemdHash(devBip.publicKey).slice(0,6);
+  let hosting = altBip.privateKey.toString('hex') + altHa.toString('hex');
+  hosting += pswBip.privateKey.toString('hex') + pswBip.chainCode.toString('hex');
+  
+  let accInfo = { phone: phoneNo,
+    alternate_no: alternate_no & 0x7fffffff,
+    alternate_off: 0,
+    figerprint: figerprint.toString('hex'),  // DEV-ACC
+    hosting_data: hosting,
+  };  // will add more: rsvd_list, rsvd_index, name, psw_pubkey_head, regist_time
+  NAL.call_('save_account',[psw,accInfo],30000).then( res => {
+    loadingEle.addClass('d-none');
+    if (res !== 'OK')
+      alert('保存账号失败');
+    else {
+      NAL.call_('ver_info').then( data2 => {
+        if (typeof data2 != 'string' && data2.ver) {
+          NAL.verInfo(data2);
+          showHostingTask('main');
+          alert('创建账号成功');
+        }
+        // else, do nothing, silent process
+      });
+    }
+  });
+}
+
+$( () => {
+  all_nav_items.on( 'click', ev => _navClick($(ev.target).attr('name')) );
+  _navClick('about');
+  
+  $('#btn-cache-nal').on( 'click', ev => {
+    if (!('serviceWorker' in navigator))
+      return alert('浏览器不支持 Service Worker');
+    
+    tempDisableBtn(ev.target);
+    showInstallBusy(true);
+    
+    navigator.serviceWorker.register('api/sw-0.js').then( reg => {
+      console.log('regist SW OK');
+      
+      let taskLoop = 0;
+      let taskId = setInterval( () => {
+        let client = reg.active;
+        if (!client) {  // registration should go active soon
+          if (++taskLoop > 30) {  // max wait 30 seconds for registing sw.js
+            console.log('waiting SW active failed');
+            showInstallBusy(false);
+            clearInterval(taskId);
+          }
+          return;
+        }
+        
+        clearInterval(taskId);
+        if (client.state == 'activated') {
+          NAL.waitReady(90).then( verInfo => {  // max waiting 90 seconds for caching files
+            if (verInfo.acc_type === 'restorable' || !verInfo.acc_type) {
+              // 'restorable' means reuse history tables in indexedDB, undefined means first install (no DB yet)
+              showInstallBusy(false);
+              showHostingTask('restore');
+            }
+            // else, unknown state
+          }).catch(e => showInstallBusy(false));
+          NAL.renewState();
+        }
+        else showInstallBusy(false);
+      }, 1000);
+    }).catch( e => {
+      console.log('regist SW fail:',e);
+    });
+  });
+  
+  $('#btn-create-acc').on('click', ev => {
+    createAccount(ev.target);
+  });
+  
+  NAL.waitReady(30).then( verInfo => {
+    if (typeof verInfo == 'string') {  // get ver_info failed
+      if (verInfo == 'none') {
+        showInstallBusy(false);
+        showHostingTask('install');
+      }
+      else {
+        console.log('SW state: ' + verInfo);
+        return alert('service worker 已安装但未正常激活，请重启浏览器，或关机重启再试');
+      }
+    }
+    else {
+      if (verInfo.acc_type === 'restorable') {
+        console.log('BIP account is ready.');
+        showHostingTask('main');
+      }
+      else {
+        console.log('BIP account is not ready.');
+        showHostingTask('restore');
+      }
+    }
+  }).catch( e => {
+    if (e.message == 'TIMEOUT')
+      alert('等待超时，请检查网络通信');
+    else {
+      console.log(e);
+      alert('NAL 运行环境异常');
+    }
+  });
+});
+
+function initAppLayer() {
+  holdingSW();
+  
+  // following will be defined later
+  jumpHostcardPage(0,true);
+  tryRenewWebList(true);
+  tryRenewSignList(true);
+}
+</script>
+
+<script>
+//---- account management
+
+function shuffle(arr) {
+  let i = arr.length, t, j;
+  while (i) {
+    j = Math.floor(Math.random() * i--);
+    t = arr[i]; arr[i] = arr[j]; arr[j] = t;  // swap arr[i] and arr[j]
+  }
+}
+
+$( () => {
+  $('#btn-verify-rsvd').on('click', ev => {
+    NAL.call('list_rsvd').then( rsvdList => {
+      if (!(rsvdList instanceof Array) || !rsvdList.length)
+        alert('获取保留字列表出错');
+      else showAndVeriRsvd(rsvdList);
+    });
+    
+    function showAndVeriRsvd(rsvdList) {
+      shuffle(rsvdList); // rsvdList must be an Array
+      NAL.dialog('rsvd',rsvdList).then( res => {
+        NAL.call_('check_rsvd',[res]).then(res2 => {
+          if (!res2) alert('验证失败');
+        });
+      }).catch(e => null);
+    }
+  });
+  
+  $('#btn-modi-acc').on('click', ev => {
+    // step 1: check inputs
+    let newPsw = $('#input-mod-psw2').val();
+    let newPsw2 = $('#input-mod-psw3').val();
+    if (newPsw != newPsw2)
+      return alert('两次输入的新密码不匹配');
+    
+    let currPsw = $('#input-mod-psw').val();
+    if (currPsw.length < 6)
+      return alert('当前密码长度不足，要求超过 6 个字母');
+    if (newPsw.length > 0 && newPsw.length < 6)
+      return alert('新设密码长度不足，要求超过 6 个字母');
+    
+    let rsvdWord = $('#input-mod-rsvd').val().trim();
+    if (!rsvdWord.match(/^[a-zA-Z0-9]{3,5}$/))
+      return alert('保留字应由 3~5 个数字或英文字母构成');
+    
+    tempDisableBtn(ev.target);
+    
+    // step 2: change psw and rsvd
+    NAL.call_('set_acc_psw',[NAL.swHost(),NAL.swMagic(),currPsw,newPsw,rsvdWord]).then( res => {
+      if (res === 'WAIT_PASS')
+        alert('操作失败：密码不正确');
+      else if (res == 'OK') {
+        alert('设置成功');
+        $('#input-mod-psw').val('');
+        $('#input-mod-psw2').val('');
+        $('#input-mod-psw3').val('');
+        $('#input-mod-rsvd').val('');
+      }
+      else alert('操作失败：' + res);
+    });
+  });
+  
+  $('#btn-rmv-cache').on('click', ev => {
+    let s = NAL.verInfo()?.ver || '';
+    if (s) s = 'v' + s + ' ';
+    if (confirm('您真的想清除 NAL ' + s + '软件缓存吗？')) {
+      unholdSW();
+      NAL.unregist();
+    }
+  });
+});
+</script>
+
+<script>
+// var msgToast = new bootstrap.Toast($('#msg-toast'),{autohide:true,delay:3000});
+// $('#msg-toast .toast-body').html('some message');
+// msgToast.show();
+
+//---- list cards
+
+var curr_hostcard = [];
+var hostcard_pg_idx = 0;
+
+let _addCardModal = new bootstrap.Modal($('#addcard-modal'),{backdrop:'static',keyboard:true});
+
+function scanCardTag(card, tag) {
+  let off = 4, n = card.length;
+  while (off < n) {
+    let t = card[off], len = card[off+1];
+    if (t === tag) return card.slice(off+2,off+2+len);
+    off += (2+len);
+  }
+  return null;  // not found
+}
+
+function jumpHostcardPage(currIdx, renew) {
+  if (renew) {
+    NAL.call_('count_cards',[NAL.swHost(),NAL.swMagic()]).then( res => {
+      if (!(res instanceof Array)) return;  // 'NONE' or meet error
+      
+      res.sort((a,b) => a[0] >= b[0]? 1: -1);
+      curr_hostcard = res;
+      updatePage(currIdx);
+    });
+  }
+  else updatePage(currIdx);
+  
+  function updatePage(currIdx) {
+    let pgNum = Math.ceil(curr_hostcard.length / 10);  // maybe 0
+    if (currIdx < 0) currIdx = pgNum - 1;
+    currIdx = Math.max(0,Math.min(currIdx,pgNum-1));
+    hostcard_pg_idx = currIdx;
+    
+    let sHtml = '';
+    let hostList = curr_hostcard.slice(currIdx*10,currIdx*10+10); // 10 items every page
+    for (let i=0,hostItem; hostItem=hostList[i]; i++) {
+      let host = hostItem[0], card = hostItem[1];
+      sHtml += '<a class="list-group-item list-group-item-action" data-name="' + host + '" data-bs-toggle="list" role="tab"><div class="d-flex w-100 justify-content-between">';
+      sHtml += '<p class="mb-0">' + htmlEscape(host) + '</p>';
+      sHtml += `<p>护照:${card.pspt||0} 签证:${card.visa||0} 绿卡:${card.gncd||0}</p>`;
+      sHtml += '</div></a>\n';
+    }
+    
+    let sPage = '<li class="page-item"><a class="page-link" data-flag="RENEW">刷新</a></li>';
+    sPage += '<li class="page-item"><a class="page-link" data-flag="FIRST">首页</a></li>';
+    if (pgNum <= 3) {
+      for (let i=0; i < pgNum; i++) {
+        sPage += pageOfIndex(i,currIdx);
+      }
+    }
+    else {  // pgNum >= 4
+      if (currIdx >= 3) sPage += pageOfIndex(-1,currIdx);
+      
+      if (currIdx >= 2)
+        sPage += pageOfIndex(currIdx-2,currIdx);
+      if (currIdx >= 1)
+        sPage += pageOfIndex(currIdx-1,currIdx);
+      sPage += pageOfIndex(currIdx,currIdx);
+      if (currIdx + 1 < pgNum)
+        sPage += pageOfIndex(currIdx+1,currIdx);
+      if (currIdx + 2 < pgNum)
+        sPage += pageOfIndex(currIdx+2,currIdx);
+      
+      if (currIdx + 3 < pgNum) sPage += pageOfIndex(-1,currIdx);
+    }
+    sPage += '<li class="page-item"><a class="page-link" data-flag="LAST">尾页</a></li>';
+    
+    $('#hostcard-table-area').removeClass('d-none').html(sHtml);
+    $('#hostcard-page-area').removeClass('d-none');
+    $('#hostcard-page-area .pagination').html(sPage);
+    
+    $('#hostcard-info-area, #hostcard-op-area').addClass('d-none');
+  }
+  
+  function pageOfIndex(i, currIdx) {
+    let cls = 'page-item', desc = (i+1) + '';
+    if (i < 0) {
+      cls += ' disabled';
+      desc = '..';
+    }
+    if (i == currIdx) cls += ' active';
+    return '<li class="' + cls + '"><a class="page-link" data-flag="' + i + '">' + desc + '</a></li>';
+  }
+}
+
+//---- list and show strategy
+
+var recent_webs_idx = 0;
+var recent_websites = [];
+
+function updateWebsitePage(newPageIdx) {
+  let pgNum = Math.ceil(recent_websites.length / 10);
+  if (pgNum <= 0) {
+    $('#website-table-area, #website-page-area, #website-info-area').addClass('d-none');
+    return;
+  }
+  
+  let currIdx = (typeof newPageIdx == 'number')? newPageIdx: recent_webs_idx;
+  currIdx = Math.max(pgNum-1,currIdx);
+  
+  let sHtml = '', counter = 0;
+  for (let i=currIdx*10,cfg; cfg=recent_websites[i]; i++) {
+    if (++counter > 10) break;
+    
+    let name = cfg[0], tm = cfg[1], roles = cfg[2];
+    tm = (new Date(tm * 1000)).toLocaleString();
+    let roleDesc = roles.join(', ');
+    if (roleDesc) roleDesc = htmlEscape('角色: ' + roleDesc);
+    
+    sHtml += '<a class="list-group-item list-group-item-action" data-name="' + name + '" data-bs-toggle="list" role="tab"><div class="d-flex w-100 justify-content-between">';
+    sHtml += '<p class="mb-0">' + htmlEscape(name) + '</p>';
+    sHtml += '<small>' + tm + '</small></div>';
+    sHtml += '<p class="mb-0 text-truncate">' + roleDesc + '</p></a>';
+  }
+  
+  let sPage = '<li class="page-item"><a class="page-link" data-flag="RENEW">刷新</a></li>';
+  sPage += '<li class="page-item"><a class="page-link" data-flag="FIRST">首页</a></li>';
+  if (pgNum <= 3) {
+    for (let i=0; i < pgNum; i++) {
+      sPage += pageOfIndex(i,currIdx);
+    }
+  }
+  else {  // pgNum >= 4
+    if (currIdx >= 3) sPage += pageOfIndex(-1,currIdx);
+    
+    if (currIdx >= 2)
+      sPage += pageOfIndex(currIdx-2,currIdx);
+    if (currIdx >= 1)
+      sPage += pageOfIndex(currIdx-1,currIdx);
+    sPage += pageOfIndex(currIdx,currIdx);
+    if (currIdx + 1 < pgNum)
+      sPage += pageOfIndex(currIdx+1,currIdx);
+    if (currIdx + 2 < pgNum)
+      sPage += pageOfIndex(currIdx+2,currIdx);
+    
+    if (currIdx + 3 < pgNum) sPage += pageOfIndex(-1,currIdx);
+  }
+  sPage += '<li class="page-item"><a class="page-link" data-flag="LAST">尾页</a></li>';
+  
+  $('#website-table-area').removeClass('d-none').html(sHtml);
+  $('#website-page-area').removeClass('d-none');
+  $('#website-page-area .pagination').html(sPage);
+  $('#website-info-area').addClass('d-none');
+  
+  recent_webs_idx = currIdx;
+  
+  function pageOfIndex(i, currIdx) {
+    let cls = 'page-item', desc = (i+1) + '';
+    if (i < 0) {
+      cls += ' disabled';
+      desc = '..';
+    }
+    if (i == currIdx) cls += ' active';
+    return '<li class="' + cls + '"><a class="page-link" data-flag="' + i + '">' + desc + '</a></li>';
+  }
+}
+
+function tryRenewWebList(resetPage) {
+  NAL.call('list_website',[NAL.swHost(),NAL.swMagic()]).then( res => {
+    if (res instanceof Array) {
+      recent_websites = res;
+      updateWebsitePage(resetPage?0:null);
+    }
+  });
+}
+
+//---- list and show sign history
+
+var recent_sign_idx = 0;
+var recent_signlist = [];
+
+function updateSignListPage(newPageIdx) {
+  let pgNum = Math.ceil(recent_signlist.length / 10);
+  if (pgNum <= 0) {
+    $('#no-signlist-area').removeClass('d-none');
+    $('#signlist-table-area, #signlist-page-area, #signlist-info-area').addClass('d-none');
+    return;
+  }
+  
+  let currIdx = (typeof newPageIdx == 'number')? newPageIdx: recent_sign_idx;
+  currIdx = Math.max(pgNum-1,currIdx);
+  
+  let sHtml = '', counter = 0;
+  for (let i=currIdx*10,cfg; cfg=recent_signlist[i]; i++) {
+    if (++counter > 10) break;
+    
+    let desc, id = cfg[0], child = cfg[1], tm = cfg[2], realm = cfg[3];
+    if (child < 0)
+      desc = '隐身份: ' + Math.abs(child);
+    else if (child >= 0x80000000)
+      desc = '元身份: ' + (child & 0x7fffffff);
+    else desc = '泛身份: ' + child;
+    tm = (new Date(tm * 1000)).toLocaleString();
+    
+    sHtml += '<a class="list-group-item list-group-item-action" data-name="' + id + '" data-bs-toggle="list" role="tab"><div class="d-flex w-100 justify-content-between">';
+    sHtml += '<p class="mb-0">' + htmlEscape(desc) + '</p>';
+    sHtml += '<small>' + tm + '</small></div>';
+    sHtml += '<p class="mb-0 text-truncate">' + htmlEscape(realm) + '</p></a>';
+  }
+  
+  let sPage = '<li class="page-item"><a class="page-link" data-flag="RENEW">刷新</a></li>';
+  sPage += '<li class="page-item"><a class="page-link" data-flag="FIRST">首页</a></li>';
+  if (pgNum <= 3) {
+    for (let i=0; i < pgNum; i++) {
+      sPage += pageOfIndex(i,currIdx);
+    }
+  }
+  else {  // pgNum >= 4
+    if (currIdx >= 3) sPage += pageOfIndex(-1,currIdx);
+    
+    if (currIdx >= 2)
+      sPage += pageOfIndex(currIdx-2,currIdx);
+    if (currIdx >= 1)
+      sPage += pageOfIndex(currIdx-1,currIdx);
+    sPage += pageOfIndex(currIdx,currIdx);
+    if (currIdx + 1 < pgNum)
+      sPage += pageOfIndex(currIdx+1,currIdx);
+    if (currIdx + 2 < pgNum)
+      sPage += pageOfIndex(currIdx+2,currIdx);
+    
+    if (currIdx + 3 < pgNum) sPage += pageOfIndex(-1,currIdx);
+  }
+  sPage += '<li class="page-item"><a class="page-link" data-flag="LAST">尾页</a></li>';
+  
+  $('#no-signlist-area').addClass('d-none');
+  
+  $('#signlist-table-area').removeClass('d-none').html(sHtml);
+  $('#signlist-page-area').removeClass('d-none');
+  $('#signlist-page-area .pagination').html(sPage);
+  $('#signlist-info-area').addClass('d-none');
+  
+  recent_sign_idx = currIdx;
+  
+  function pageOfIndex(i, currIdx) {
+    let cls = 'page-item', desc = (i+1) + '';
+    if (i < 0) {
+      cls += ' disabled';
+      desc = '..';
+    }
+    if (i == currIdx) cls += ' active';
+    return '<li class="' + cls + '"><a class="page-link" data-flag="' + i + '">' + desc + '</a></li>';
+  }
+}
+
+function tryRenewSignList(resetPage) {
+  NAL.call('list_signature',[NAL.swHost(),NAL.swMagic()]).then( res => {
+    if (res instanceof Array) {
+      recent_signlist = res;
+      updateSignListPage(resetPage?0:null);
+    }
+  });
+}
+
+$( () => {
+  $('#hostcard-table-area').on('click', ev => {
+    let itemNode = $(ev.target).parents('.list-group-item');
+    if (itemNode.length == 0) return;
+    let host = itemNode.data('name');
+    if (!host) return;
+    
+    NAL.call_('list_cards',[NAL.swHost(),NAL.swMagic(),true,null,host]).then( res => {
+      if (!(res instanceof Array)) return;
+      
+      let sHtml = '';
+      res.forEach( (card,idx) => {
+        let cardDesc, cardChild = Math.abs(card.child);
+        if (card.flag == 'pspt') {
+          if (cardChild >= 0x80000000) {
+            cardDesc = '元护照';
+            cardChild -= 0x80000000;
+          }
+          else cardDesc = '泛护照';
+        }
+        else if (card.flag == 'visa')
+          cardDesc = '签证';
+        else if (card.flag == 'gncd')
+          cardDesc = '绿卡';
+        else return;  // it should not happen
+        
+        let pubkey = card.pubkey || '';
+        if (pubkey) {
+          let fp = ripemdHash(Buffer.from(pubkey,'hex')).slice(0,4).toString('hex');
+          pubkey = '公钥指纹: ' + parseInt(fp,16) + '<br>';
+        }
+        else pubkey = '';
+        
+        let role = '', roleDesc = '';
+        if (card.flag != 'pspt') {
+          role = card.role || '';
+          roleDesc = `授权角色: ${role}<br>`;
+        }
+        let comeFrom = card.comefrom || 'myself';
+        let expired = (new Date(Math.abs(card.expired) * 1000)).toLocaleString();
+        
+        sHtml += `<div class="hostcard-item" data-host="${card.host}" data-role="${role}" data-flag="${card.flag}" data-child="${card.child}" data-content="${card.content}">${cardDesc}: ${cardChild}, 来自 ${comeFrom}<br>${roleDesc}${pubkey}过期时间: ${expired}<br><a class="card-rmv" href="javascript:void(0)">移除本项</a> &nbsp; <a class="card-copy" href="javascript:void(0)">拷贝本项</a></div>`;
+      });
+      
+      $('#hostcard-info-area').removeClass('d-none').html(sHtml).data('name',host);
+      $('#hostcard-op-area').removeClass('d-none');
+    });
+  });
+  
+  $('#hostcard-page-area .pagination').on('click', ev => {
+    let targNode = $(ev.target);
+    if (!targNode.hasClass('page-link')) return;
+    
+    let flag = targNode.data('flag');
+    if (flag == 'RENEW') {
+      jumpHostcardPage(0,true);
+    }
+    else {
+      if (!curr_hostcard.length) return;
+      
+      if (flag == 'FIRST')
+        jumpHostcardPage(0,false);
+      else if (flag == 'LAST')
+        jumpHostcardPage(-1,false);
+      else {
+        flag = parseInt(flag);
+        if (typeof flag == 'number')
+          jumpHostcardPage(flag,false);
+      }
+    }
+  });
+  
+  $('#hostcard-info-area').on('click', ev => {
+    let targ = $(ev.target);
+    let isRmv = targ.hasClass('card-rmv'), isCopy = targ.hasClass('card-copy');
+    if (!isRmv && !isCopy) return;
+    
+    let cardNode = targ.parents('.hostcard-item');
+    if (!cardNode.length) return;
+    
+    let cardHost = cardNode.data('host');
+    let cardFlag = cardNode.data('flag');
+    let cardRole = cardNode.data('role');
+    let cardChild = parseInt(cardNode.data('child'));
+    let cardContent = cardNode.data('content');
+    
+    if (!cardChild || !cardContent) return; // unexpected error
+    
+    if (isRmv) {
+      NAL.call_('remove_card',[NAL.swHost(),NAL.swMagic(),cardHost,cardFlag,cardRole,cardChild]).then( res => {
+        if (res === 'OK') {
+          cardNode.remove();
+          alert('成功移除项目');
+        }
+        else {
+          console.log('remove card failed: ' + res);
+          alert('移除项目失败');
+        }
+      });
+    }
+    else { // isCopy
+      let prefix = Buffer.alloc(4,0);
+      prefix.writeUInt32BE(cardChild);
+      
+      let buf = Buffer.concat([prefix,Buffer.from(cardContent,'hex')]);
+      let crc = CreateHash('sha256').update(buf).digest().slice(0,4);
+      let txt = Buffer.concat([buf,crc]).toString('hex');
+      
+      let edtNode = $('#edt-card-ctx');
+      edtNode.val(txt);
+      edtNode.select();
+      document.execCommand('copy');
+      alert('卡证已拷贝');
+    }
+  });
+  
+  $('#btn-add-card').on('click', ev => {
+    let host = $('#hostcard-info-area').data('name');
+    if (!host) return;
+    
+    $('#dlg-btn-addcard').data('host',host)
+    _addCardModal.show();
+  });
+  
+  $('#dlg-btn-addcard').on('click', ev => {
+    let targHost = $('#dlg-btn-addcard').data('host');
+    if (!targHost) return;
+    
+    let cardContent = $('#addcard-content').val().trim().toLowerCase();
+    if (!cardContent) return alert('请输入或粘贴卡证内容');
+    
+    let child, flag, role, succ = true;
+    try {
+      let buf = Buffer.from(cardContent,'hex');
+      flag = buf.slice(4,8).toString('utf-8');
+      if (flag != 'pspt' && flag != 'visa' && flag != 'gncd')
+        succ = false;
+      else {
+        let crc = CreateHash('sha256').update(buf.slice(0,-4)).digest().slice(0,4).toString('hex');
+        if (crc != buf.slice(-4).toString('hex'))
+          return alert('卡证校验不通过');
+        
+        child = buf.readUInt32BE(0);  
+        buf = buf.slice(4,-4);
+        
+        let realm = scanCardTag(buf,0xc8)  // 0xc8 is TAG_REALM
+        if (!realm)
+          succ = false;
+        else {
+          role = realm.toString('utf-8').split('+')[1] || '';
+          cardContent = buf.toString('hex');
+        }
+      }
+    }
+    catch(e) {
+      succ = false;
+    }
+    if (!succ) return alert('卡证格式不正确');
+    
+    let comefrom = $('#addcard-auth').val().trim();
+    NAL.call_('save_card',[NAL.swHost(),NAL.swMagic(),flag,role,child,cardContent,'',comefrom,targHost]).then( res => {
+      let cardDesc = flag == 'pspt'? '护照': (flag == 'visa'? '签证': '绿卡');
+      if (res === 'OK') {
+        $('#addcard-auth').val('');
+        $('#addcard-content').val('');
+        _addCardModal.hide();
+        setTimeout(() => alert(`卡证（${cardDesc}）已成功添加`),300);
+      }
+      else alert(`保存卡证（${cardDesc}）失败`);
+    });
+  });
+  
+  //----
+  
+  $('#website-table-area').on('click', ev => {
+    let itemNode = $(ev.target).parents('.list-group-item');
+    if (itemNode.length == 0) return;
+    let name = itemNode.data('name');
+    if (!name) return;
+    
+    if (name == NAL.swHost())
+      hideWebStrategy();
+    else showWebStrategy(name);
+    
+    function showWebStrategy(hostname) {
+      NAL.call('web_strategy',[NAL.swHost(),NAL.swMagic(),hostname]).then( res => {
+        if (typeof res == 'string') {
+          hideWebStrategy();
+          return;
+        }
+        
+        let s = '<code><pre>' + JSON.stringify(res,null,2) + '</pre></code>';
+        $('#website-info-area').removeClass('d-none').html(s);
+      });
+    }
+    
+    function hideWebStrategy() {
+      $('#website-info-area').addClass('d-none').html('');
+    }
+  });
+  
+  $('#website-page-area .pagination').on('click', ev => {
+    let targNode = $(ev.target);
+    if (!targNode.hasClass('page-link')) return;
+    
+    let flag = targNode.data('flag');
+    if (flag == 'RENEW')
+      tryRenewWebList(false);
+    else {
+      if (flag == 'FIRST')
+        updateWebsitePage(0);
+      else if (flag == 'LAST')
+        updateWebsitePage(Math.ceil(recent_websites.length/10)-1);
+      else {
+        flag = parseInt(flag);
+        if (typeof flag == 'number')
+          updateWebsitePage(flag);
+      }
+    }
+  });
+  
+  //----
+  
+  $('#btn-refresh-signlist').on('click', ev => {
+    tryRenewSignList(true);
+  });
+  
+  $('#signlist-table-area').on('click', ev => {
+    let itemNode = $(ev.target).parents('.list-group-item');
+    if (itemNode.length == 0) return;
+    let name = itemNode.data('name');
+    if (!name) return;
+    
+    showSignListItem(parseInt(name));
+    
+    function showSignListItem(itemId) {
+      NAL.call('get_signed_item',[NAL.swHost(),NAL.swMagic(),itemId]).then( res => {
+        if (!(res instanceof Array)) {
+          hideSignListItem();
+          return;
+        }
+        
+        // res should be [child,sign_tm,realm,pubkey,content,signature]
+        let tm = (new Date(res[1] * 1000)).toLocaleString();
+        let pubkey = Buffer.from(res[3],'hex');
+        let fp = ripemdHash(pubkey).slice(0,4);
+        let s = '<span>账号指纹：' + parseInt(fp.toString('hex'),16) + '</span><br>';
+        s += '<span>账号公钥：' + htmlEscape(res[3]) + '</span><br>';
+        s += '<span>授权领域：' + htmlEscape(res[2]) + '</span><br>';
+        s += '<span>授权时间：' + tm + '</span><br>';
+        s += '<span>授权内容：' + htmlEscape(res[4]) + '</span><br>';
+        s += '<span>授权签名：' + htmlEscape(res[5]) + '</span>';
+        $('#signlist-info-area').removeClass('d-none').html(s);
+      });
+    }
+    
+    function hideSignListItem() {
+      $('#signlist-info-area').addClass('d-none').html('');
+    }
+  });
+  
+  $('#signlist-page-area .pagination').on('click', ev => {
+    let targNode = $(ev.target);
+    if (!targNode.hasClass('page-link')) return;
+    
+    let flag = targNode.data('flag');
+    if (flag == 'RENEW')
+      tryRenewSignList(false);
+    else {
+      if (flag == 'FIRST')
+        updateSignListPage(0);
+      else if (flag == 'LAST')
+        updateSignListPage(Math.ceil(recent_signlist.length/10)-1);
+      else {
+        flag = parseInt(flag);
+        if (typeof flag == 'number')
+          updateSignListPage(flag);
+      }
+    }
+  });
+});
+</script>
+
 </body>
 </html>
