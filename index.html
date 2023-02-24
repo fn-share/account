@@ -943,7 +943,7 @@ function showHostingTask(task) {
 }
 
 function checkPhoneNo(sPhone) {
-  if (sPhone.search(/^\d+$/) == -1 || sPhone.length <= 10 || sPhone.length >= 15 || sPhone[0] != '1')
+  if (sPhone.search(/^\d+$/) == -1 || sPhone.length <= 7 || sPhone.length >= 15 || sPhone[0] != '1')
     return false;
   else return true;
 }
