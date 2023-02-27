@@ -38,7 +38,8 @@ const bip66 = require('bip66');
 
 const ZERO = Buffer.alloc(1,0);
 
-const DEFAULT_CRYPTO_HOST = 'https://www.fn-share.com/crypto_host';
+const DEFAULT_REAL_SERVER = 'real.fn-share.com';
+const DEFAULT_CRYPTO_HOST = 'www.fn-share.com/crypto_host';
 
 function wrapCryptoBuf(msg) {
   if (msg.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
@@ -176,7 +177,7 @@ async function recycleDataStore() {
 
 function _renewCryptoHost(db, accInfo, now) {
   // default fetch timeout is indicated by the browser, chrome is 300s, firefox is 90s
-  let url = accInfo.crypto_host_url || DEFAULT_CRYPTO_HOST;
+  let url = 'https://' + (accInfo.crypto_host_url || DEFAULT_CRYPTO_HOST);
   fetch(url).then(res => res.text()).then( res2 => {
     if (res2 && typeof res2 == 'string') {
       accInfo.crypto_host = res2;
@@ -859,6 +860,7 @@ function BipAccount() {
       return { real_idx, figerprint, did_figerprint, real_figerprint, psw_figerprint, did_realid,
         did_pubkey:didRoot.publicKey.toString('hex'),
         real_pubkey:realRoot.publicKey.toString('hex'),
+        real_chaincode: realRoot.chainCode.toString('hex'),
         psw_pubkey:pswRoot.publicKey.toString('hex') };
     },
     
@@ -1911,20 +1913,24 @@ self.addEventListener('message', async event => {
         return;
       }
       
-      else if (msg.cmd == 'crypto_host_url') {
-        let ret = 'NONE';
-        if (cfg) {
+      else if (msg.cmd == 'set_real_server' || msg.cmd == 'set_crypto_host_url') {
+        let ret = 'NONE', newValue = msg.param[2];
+        if (cfg && typeof newValue == 'string') {
+          newValue = newValue.trim();
+          if (newValue.indexOf('https://') == 0) newValue = newValue.slice(8).trim();
+          
           let accInfo = await db.get('config','account');
           if (accInfo) {
-            let newValue = msg.param[2];
-            if (typeof newValue == 'string') {  // set crypto_host_url
-              newValue = newValue.trim();
-              accInfo.crypto_host_url = newValue;
-              await db.put('config',accInfo);
-              ret = {url:newValue};
+            if (msg.cmd == 'set_real_server') {
+              newValue = newValue || DEFAULT_REAL_SERVER;
+              accInfo.real_sp = newValue;
             }
-            else  // read crypto_host_url
-              ret = {url:accInfo.crypto_host_url || DEFAULT_CRYPTO_HOST};
+            else {
+              newValue = newValue || DEFAULT_CRYPTO_HOST;
+              accInfo.crypto_host_url = newValue;
+            }
+            await db.put('config',accInfo);
+            ret = {url:newValue};
           }
           else ret = 'NOT_READY';
         }
@@ -1982,7 +1988,7 @@ self.addEventListener('message', async event => {
         return;
       }
       
-      if (msg.cmd == 'acc_summary') {  // only for NAL website
+      if (msg.cmd == 'acc_summary') {
         let ret = 'NONE', bipInfo = rootBip.info();
         if (cfg && bipInfo) {
           let verInfo = await db.get('config','ver_info');
@@ -1994,7 +2000,10 @@ self.addEventListener('message', async event => {
           
           let accInfo = await db.get('config','account');
           if (accInfo) {
+            bipInfo.phone = accInfo.phone;
             bipInfo.alternate_off = accInfo.alternate_off;
+            bipInfo.real_sp = accInfo.real_sp || DEFAULT_REAL_SERVER;
+            bipInfo.crypto_host_url = accInfo.crypto_host_url || DEFAULT_CRYPTO_HOST;
           }
           ret = bipInfo;
         }
