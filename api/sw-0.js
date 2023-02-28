@@ -793,7 +793,7 @@ function gen_ecdh_key(pubkey33, re_gen) {
 
 function BipAccount() {
   // we hide some variables here, avoid leaking out by console.log()
-  let phone = null, figerprint = null, real_idx = null;
+  let phone = null, figerprint = null;
   let alternate_no = null, alternate_off = 0;
   let didRoot = null, undisRoot = null, pswRoot = null, secureRoot = null, realRoot = null;
   let securebox_cipher = '';
@@ -805,7 +805,7 @@ function BipAccount() {
       return !!pswRoot;
     },
     
-    disableBip() {   // no need clear: real_idx, figerprint
+    disableBip() {   // no need clear: figerprint
       didRoot = null;    // did
       undisRoot = null;  // did/alternate, undisclosed account
       secureRoot = null; // did/alternate/0
@@ -818,7 +818,6 @@ function BipAccount() {
       alternate_off = accInfo.alternate_off;
       alternate_no = (accInfo.alternate_no + alternate_off) & 0x7fffffff;
       figerprint = arg3;
-      real_idx = hash256_d('REAL:'+phone).toString('hex');
       
       didRoot = bip32.fromPrivateKey(secret.slice(0,32),secret.slice(32,64));
       realRoot = didRoot.derive(0).derive(0);
@@ -851,17 +850,16 @@ function BipAccount() {
     },
     
     info() {
-      if (!didRoot || !pswRoot || !realRoot) return {real_idx, figerprint};
+      if (!didRoot || !pswRoot || !realRoot) return {figerprint};
       
       let did_figerprint = figerprintOf(didRoot.publicKey);
-      let psw_figerprint = figerprintOf(pswRoot.publicKey);
       let real_figerprint = figerprintOf(realRoot.publicKey);
       let did_realid = b36checkEncode(realRoot.publicKey,'rid1');
-      return { real_idx, figerprint, did_figerprint, real_figerprint, psw_figerprint, did_realid,
+      return { figerprint, did_figerprint, real_figerprint, did_realid,
         did_pubkey:didRoot.publicKey.toString('hex'),
         real_pubkey:realRoot.publicKey.toString('hex'),
-        real_chaincode: realRoot.chainCode.toString('hex'),
-        psw_pubkey:pswRoot.publicKey.toString('hex') };
+        psw_pubkey:pswRoot.publicKey.toString('hex'),
+        real_chaincode: realRoot.chainCode.toString('hex') };
     },
     
     getDidPubkey(child) {
@@ -877,7 +875,7 @@ function BipAccount() {
     
     signDisabling(tm) {
       let ha = CreateHash('sha256').update(Buffer.from('NBC_DISABLE_PSPT:'+tm)).digest();
-      return [ hash256_d('REAL:' + phone).toString('hex'),
+      return [ b36checkEncode(realRoot.publicKey,'rid1'),
         signDer(realRoot,ha).toString('hex') ];
     },
     
@@ -1634,11 +1632,12 @@ self.addEventListener('message', async event => {
       let db = await wallet_db;
       let accInfo = await db.get('config','account');
       let crypto_host = accInfo?.crypto_host || '';
-      let forceRenew = msg.param[0], now = Math.floor((new Date()).valueOf()/1000);
+      let forceRenew = msg.param[0], expireTm = msg.param[1] || 259200;  // 259200 is 3 days
+      let last_renew = accInfo.crypto_host_tm || 0;
       
-      if (forceRenew || !crypto_host || now - (accInfo.crypto_host_tm||0) > 259200) // need renew, 259200 is 3 days
-        _renewCryptoHost(db,accInfo,now);  // no waiting
-      event.source.postMessage(prefix+JSON.stringify({id,result:crypto_host}));
+      if (forceRenew || !crypto_host || (Math.floor((new Date()).valueOf()/1000) - last_renew) > expireTm)
+        _renewCryptoHost(db,accInfo,now);   // no waiting
+      event.source.postMessage(prefix+JSON.stringify({id,result:crypto_host,last_renew}));
     }
     
     else if (msg.cmd == 'set_ver_info') {   // must call 'save_account' at later
@@ -1894,19 +1893,6 @@ self.addEventListener('message', async event => {
         if (cfg && typeof name == 'string' && name) {
           cfg = await db.get('config',name);
           if (cfg && cfg.strategy) ret = cfg.strategy;
-        }
-        
-        event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
-        return;
-      }
-      
-      else if (msg.cmd == 'get_realidx') {
-        let ret = 'NONE';
-        if (cfg) {
-          let accInfo = await db.get('config','account');
-          if (accInfo)
-            ret = {real_idx:hash256_d('REAL:'+accInfo.phone).toString('hex')};
-          else ret = 'NOT_READY';
         }
         
         event.source.postMessage(prefix+JSON.stringify({id,result:ret}));

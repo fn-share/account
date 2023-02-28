@@ -205,7 +205,12 @@
   <span class="input-group-text">https://</span>
   <input type="text" class="form-control text-truncate" autocomplete="off" id="input-realhost">
 </div>
-<div class="mb-3"><button type="button" class="btn btn-primary" id="btn-set-realhost">设置</button><button type="button" class="btn btn-primary ms-2" id="btn-real-auth">请求真身验证...</button></div>
+<div class="mb-3">
+  <button type="button" class="btn btn-primary" id="btn-set-realhost">保存 URL</button>
+  <button type="button" class="btn btn-success ms-2" id="btn-real-state">查询状态</button>
+  <button type="button" class="btn btn-success ms-1" id="btn-stop-pspt">停用服务</button>
+  <button type="button" class="btn btn-success ms-1" id="btn-real-auth">请求真身验证...</button>
+</div>
 
 <h2 class="mt-5 mb-4">设置通密服务点查询 URL</h2>
 <p class="mb-4">该 URL 用于让客户端机器发起请求获得通密服务点地址，申请绿卡需由通密服务点提供服务，本项取空值表示使用 FNS 官方提供查询点。</p>
@@ -213,7 +218,10 @@
   <span class="input-group-text">https://</span>
   <input type="text" class="form-control text-truncate" autocomplete="off" id="input-cryptohost">
 </div>
-<div class="mb-3"><button type="button" class="btn btn-primary" id="btn-set-cryptohost">设置</button></div>
+<div class="mb-3">
+  <button type="button" class="btn btn-primary" id="btn-set-cryptohost">保存 URL</button>
+  <button type="button" class="btn btn-success ms-2" id="btn-crypto-state">模拟测试</button>
+</div>
 </div>  <!-- end of #list-real -->
 
 <div class="tab-pane fade" id="list-card" role="tabpanel">
@@ -902,20 +910,7 @@ function showInstallBusy(isBusy) {
   $('#btn-cache-busy').toggleClass('d-none',!isBusy);
 }
 
-var _currRealIdx = null;
 var _currAlterOff = 0;
-
-function getRealIndex(callback) {
-  if (_currRealIdx !== null)
-    return callback(_currRealIdx);
-  
-  NAL.call_('get_realidx',[NAL.swHost(),NAL.swMagic()]).then( res => {
-    if (typeof res == 'string')
-      _currRealIdx = null;
-    else _currRealIdx = res.real_idx;
-    callback(_currRealIdx);
-  });
-}
 
 function showHostingTask(task) {
   let targName = 'hosting-pre-' + task;
@@ -940,7 +935,6 @@ function showHostingTask(task) {
   
   function showAccount(info) {
     // step 1: show account info
-    _currRealIdx  = info.real_idx;
     _currAlterOff = info.alternate_off || 0;
     
     wait__(fetch('/account/api/version.txt'),30000).then( res => {
@@ -1177,7 +1171,10 @@ $( () => {
   });
 });
 
+var curr_real_id = '';
+
 function initAppLayer(info) {
+  curr_real_id = info.did_realid;
   holdingSW();
   
   // following will be defined later
@@ -1262,8 +1259,7 @@ $( () => {
 });
 </script>
 
-<script>
-//---- set real server point and crypto server point
+<script> //---- set real server point and crypto server point
 function showRealAccount(info) {
   $('#my-real-phone').text(info.phone);
   $('#my-real-pub').text(info.real_pubkey);
@@ -1282,9 +1278,89 @@ $( () => {
     });
   });
   
+  $('#btn-real-state').on('click', ev => {
+    if (!curr_real_id) return;  // not ready yet
+    let url = $('#input-realhost').val().trim();
+    if (!url) return alert('请先指定真身服务点 URL');
+    
+    url = 'https://' + url;
+    if (url.slice(-1) == '/') url = url.slice(0,-1);
+    
+    tempDisableBtn(ev.target);
+    url_fetch(url+'/users/disabling?id='+curr_real_id, data => {
+      if (data === null || typeof data.state != 'number')
+        alert('查询失败');
+      else {
+        if (data.state === 0)
+          alert('真身服务状态正常');
+        else if (typeof data.last_disable == 'number') {
+          let tm = new Date(data.last_disable * 1000);
+          alert(`真身服务从 ${tm.toLocaleString()} 开始已停用`);
+        }
+      }
+    });
+  });
+  
+  $('#btn-stop-pspt').on('click', ev => {
+    if (!curr_real_id) return;  // not ready yet
+    let url = $('#input-realhost').val().trim();
+    if (!url) return alert('请先指定真身服务点 URL');
+    
+    url = 'https://' + url;
+    if (url.slice(-1) == '/') url = url.slice(0,-1);
+    
+    NAL.dialog('pass').then( psw => {
+      NAL.call_('sign_disabling',[NAL.swHost(),NAL.swMagic(),psw]).then( res => {
+        if (typeof(res) == 'string') {
+          if (res == 'NEED_PASS')
+            alert('密码不正确');
+          else alert('账号异常');
+          return;
+        }
+        // else, res is {time,account,signature}
+        
+        wait__(fetch(url+'/users/disabling',{method:'POST',body:JSON.stringify(res)}),
+        3000).then( res2 => {
+          if (res2.status == 200)
+            return res2.json();
+          else {
+            if (res2.status == 400) {
+              res2.text().then( desc => {
+                if (desc == 'INVALID_TIME')
+                  alert('时间不匹配');
+                else if (desc == 'NO_ACCOUNT')
+                  alert('账号不存在');
+                else if (desc == 'ALREADY_DISABLED') {
+                  $('#btn-stop-pspt').addClass('disabled');
+                  alert('服务早已停用');
+                }
+                else if (desc == 'WRITE_DB_FAILED')
+                  alert('写数据错误，请稍候重试');
+                else alert('提交请求失败：' + desc);
+              });
+            }
+            else if (res2.status == 401)
+              alert('鉴权失败');
+            else alert('提交请求失败');
+            return null;
+          }
+        }, e => {
+          alert('提交失败，请检查网络');
+          return null;
+        }).then( data => {
+          if (data === null) return;
+          if (data.result == 'success') {
+            $('#btn-stop-pspt').attr('disabled',true);
+            alert('停用真身服务成功');
+          }
+        });
+      });
+    }).catch( e => null );
+  });
+  
   $('#btn-real-auth').on('click', ev => {
     let url = $('#input-realhost').val().trim();
-    if (!url) return alert('未知真身服务点');
+    if (!url) return alert('请先指定真身服务点 URL');
     
     url = 'https://' + url;
     if (url.slice(-1) == '/') url = url.slice(0,-1);
@@ -1297,12 +1373,30 @@ $( () => {
   
   $('#btn-set-cryptohost').on('click', ev => {
     let url = $('#input-cryptohost').val().trim();
+    if (url.slice(-1) == '/') url = url.slice(0,-1);
     NAL.call_('set_crypto_host_url',[NAL.swHost(),NAL.swMagic(),url]).then( res => {
       if (res && res.url)
         alert('更改成功');
     });
   });
-}); 
+  
+  $('#btn-crypto-state').on('click', ev => {
+    let url = $('#input-cryptohost').val().trim();
+    if (!url) return alert('请先指定通密服务点 URL');
+    url = 'https://' + url;
+    if (url.slice(-1) == '/') url = url.slice(0,-1);
+    
+    wait__(fetch(url),3000).then( res => {
+      if (res.status == 200)
+        return res.text();
+      else return null;
+    }, e => null ).then( data => {
+      if (data && typeof data == 'string')
+        alert('调用返回：' + data);
+      else alert('调用失败');
+    });
+  });
+});
 </script>
 
 <script>
