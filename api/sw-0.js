@@ -796,6 +796,7 @@ function BipAccount() {
   let phone = null, figerprint = null;
   let alternate_no = null, alternate_off = 0;
   let didRoot = null, undisRoot = null, pswRoot = null, secureRoot = null, realRoot = null;
+  let selfsign_no = null, selfsign = null;
   let securebox_cipher = '';
   
   let gncd_fetch_keys = [];
@@ -811,18 +812,24 @@ function BipAccount() {
       secureRoot = null; // did/alternate/0
       realRoot = null;   // did/0/0
       pswRoot = null;    // psw/0'
+      
+      selfsign_no = null;
+      selfsign = null;
     },
     
-    config(secret, accInfo, arg3) {
+    config(secret, accInfo, fp) {
       phone = accInfo.phone;
       alternate_off = accInfo.alternate_off;
       alternate_no = (accInfo.alternate_no + alternate_off) & 0x7fffffff;
-      figerprint = arg3;
+      figerprint = fp;
       
       didRoot = bip32.fromPrivateKey(secret.slice(0,32),secret.slice(32,64));
       realRoot = didRoot.derive(0).derive(0);
       undisRoot = didRoot.derive(alternate_no);
       secureRoot = undisRoot.derive(0);  // "alt/alternate/0" for securebox crypto
+      
+      selfsign_no = accInfo.selfsign_no;
+      selfsign = realRoot.derive(selfsign_no);
       
       pswRoot = bip32.fromPrivateKey(secret.slice(64,96),secret.slice(96,128));
       pswRoot = pswRoot.derive(0x80000000);   // forget original psw account
@@ -855,10 +862,11 @@ function BipAccount() {
       let did_figerprint = figerprintOf(didRoot.publicKey);
       let real_figerprint = figerprintOf(realRoot.publicKey);
       let did_realid = b36checkEncode(realRoot.publicKey,'rid1');
-      return { figerprint, did_figerprint, real_figerprint, did_realid,
-        did_pubkey:didRoot.publicKey.toString('hex'),
-        real_pubkey:realRoot.publicKey.toString('hex'),
-        psw_pubkey:pswRoot.publicKey.toString('hex'),
+      return { figerprint, did_figerprint, real_figerprint, did_realid, selfsign_no,
+        did_pubkey: didRoot.publicKey.toString('hex'),
+        real_pubkey: realRoot.publicKey.toString('hex'),
+        selfsign_pubkey: selfsign.publicKey.toString('hex'),
+        psw_pubkey: pswRoot.publicKey.toString('hex'),
         real_chaincode: realRoot.chainCode.toString('hex') };
     },
     
@@ -877,6 +885,19 @@ function BipAccount() {
       let ha = CreateHash('sha256').update(Buffer.from('NBC_DISABLE_PSPT:'+tm)).digest();
       return [ b36checkEncode(realRoot.publicKey,'rid1'),
         signDer(realRoot,ha).toString('hex') ];
+    },
+    
+    changeSelfSign(no) {
+      if (realRoot) {
+        try {
+          let tmp = realRoot.derive(no);
+          selfsign_no = no;
+          selfsign = tmp;
+          return tmp.publicKey.toString('hex');
+        }
+        catch(e) { console.log(e); }
+      }
+      return null;
     },
     
     sessionSign(child, host, realm, ctx) {
@@ -1685,17 +1706,18 @@ self.addEventListener('message', async event => {
       let tm = Math.floor((new Date()).valueOf() / 1000);
       accInfo.name = 'account';  // set keyPath
       accInfo.regist_time = tm;
+      accInfo.selfsign_no = Math.floor(Math.random() * 0x7fffffff) + 1; // not 0
       
       let fp = parseInt(accInfo.figerprint.slice(0,8),16);
       rootBip.config(secret,accInfo,fp);
       let bipInfo = rootBip.info();
       accInfo.psw_pubkey_head = bipInfo.psw_pubkey.slice(0,4);
-      await db.put('config', accInfo);
+      await db.put('config',accInfo);
       
       ver_info.acc_type = 'restorable';
-      await db.put('config', ver_info);
+      await db.put('config',ver_info);
       
-      let nalCfg = {name:NAL_WEBHOST,sw_magic:0,magic_tm:0-tm};
+      let nalCfg = { name:NAL_WEBHOST, sw_magic:0, magic_tm:0-tm };
       await db.put('config', nalCfg);
       
       event.source.postMessage(prefix+JSON.stringify({id,result:'OK'}));
@@ -1816,6 +1838,17 @@ self.addEventListener('message', async event => {
       if (tryDelay)
         setTimeout(() => event.source.postMessage(prefix+ret),2000);
       else event.source.postMessage(prefix+ret);
+    }
+    
+    else if (msg.cmd == 'nick_avatar') {
+      let ret = 'NONE', size = msg.param[0] || '200x200';
+      let cfg = await (await wallet_db).get('config',NAL_WEBHOST);
+      if (cfg) {
+        let img = cfg['avatar_' + size];
+        if (typeof img != 'string') img = '';
+        ret = {nickname:cfg.nickname||'', avatar:img};
+      }
+      event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
     }
     
     else if (msg.cmd == 'vdf_result') {
@@ -1947,7 +1980,7 @@ self.addEventListener('message', async event => {
             if (!passed)
               ret = 'WAIT_PASS';
             else {
-              fixKey = gen_fix_key(accInfo.phone,newPsw);  // use new fixKey
+              fixKey = gen_fix_key(accInfo.phone,newPsw || oldPsw);
               let secret2 = encryptMsg(enhanceFixKey(fixKey),secret);
               accInfo.hosting_data = secret2.toString(CryptoJS.enc.Base64);
               
@@ -1994,6 +2027,50 @@ self.addEventListener('message', async event => {
           ret = bipInfo;
         }
         
+        event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+      }
+      
+      else if (msg.cmd == 'set_selfsign') {
+        let ret = 'NONE', no = msg.param[2];
+        if (cfg) {
+          if (typeof no == 'number' && no)
+            no = Math.floor(no) & 0x7fffffff;
+          else no = 0;
+          if (!no) no = Math.floor(Math.random() * 0x7fffffff) + 1;  // not 0
+          
+          let accInfo = await db.get('config','account');
+          if (accInfo) {
+            pubkey = rootBip.changeSelfSign(no);
+            if (pubkey) {
+              accInfo.selfsign_no = no;
+              await db.put('config',accInfo);
+              ret = {result:'OK', selfsign_no:no, selfsign_pubkey:pubkey};
+            }
+          }
+          else ret = 'NOT_READY';
+        }
+        event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+      }
+      
+      else if (msg.cmd == 'set_nick_avatar') {
+        let ret, nick = msg.param[2];
+        let img200 = msg.param[3], img160 = msg.param[4], img120 = msg.param[5];
+        let img80 = msg.param[6], img48 = msg.param[7], img32 = msg.param[8];
+        if (typeof nick != 'string') nick = '';
+        if (typeof img200 == 'string' && typeof img160 == 'string' && 
+            typeof img120 == 'string' && typeof img80 == 'string' &&
+            typeof img48 == 'string' && typeof img32 == 'string' ) {
+          cfg.nickname = nick;
+          cfg.avatar_200x200 = img200;
+          cfg.avatar_160x160 = img160;
+          cfg.avatar_120x120 = img120;
+          cfg.avatar_80x80 = img80;
+          cfg.avatar_48x48 = img48;
+          cfg.avatar_32x32 = img32;
+          await db.put('config',cfg);
+          ret = {result:'OK'};
+        }
+        else ret = 'INVALID_IMAGE';
         event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
       }
       

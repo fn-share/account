@@ -130,6 +130,7 @@
     <a class="list-group-item list-group-item-action active" id="list-abstract-list" data-bs-toggle="list" href="#list-abstract" role="tab">摘要</a>
     <a class="list-group-item list-group-item-action" id="list-psw-list" data-bs-toggle="list" href="#list-psw" role="tab">账号密码</a>
     <a class="list-group-item list-group-item-action" id="list-real-list" data-bs-toggle="list" href="#list-real" role="tab">真身验证</a>
+    <a class="list-group-item list-group-item-action" id="list-selfsign-list" data-bs-toggle="list" href="#list-selfsign" role="tab">自签护照</a>
     <a class="list-group-item list-group-item-action" id="list-policy-list" data-bs-toggle="list" href="#list-card" role="tab">卡证列表</a>
     <a class="list-group-item list-group-item-action" id="list-policy-list" data-bs-toggle="list" href="#list-policy" role="tab">策略定义</a>
     <a class="list-group-item list-group-item-action" id="list-log-list" data-bs-toggle="list" href="#list-log" role="tab">授权历史</a>
@@ -142,9 +143,9 @@
 <h2 class="mb-4">当前账号</h2>
 <div class="alert alert-primary mb-2 text-break" role="alert">
 <!-- <span id="acc-alter">小号序号：</span><br>
-  <span id="dev-fp">设备指纹：</span><br>  -->
+  <span id="dev-fp">设备指纹：</span><br>
   <span id="did-fp">根身指纹：</span><br>
-  <span id="did-pub">根身账号：</span><br><br>
+  <span id="did-pub">根身账号：</span><br><br>  -->
   <span id="real-fp">真身指纹：</span><br>
   <span id="did-real">真身标识：</span><br>
   <span id="real-pub">真身账号：</span>
@@ -192,7 +193,7 @@
 <div class="tab-pane fade" id="list-real" role="tabpanel">
 <h2 class="mb-4">关于真身验证</h2>
 <p class="mb-2">真身验证（Real Person Verification）是第三方网站提供真人验证服务，<strong>用于确保被服务对象是真实人类</strong>。NBC DID 要求真身验证至少要采用手机短信的验证方式，验证通过后第三方网站在它布署的真身服务点（Real Server Point），为用户提供诸如护照颁发、护照验真等服务。</p>
-<p class="mb-2">您应该为自己的账号管理器指定一个真身服务点并完成真身验证，以便申请可信护照并用它登录各类应用网站。否则，你只能自行颁发自签护照，自签护照是不可信护照，只在少数应用网站适用。</p>
+<p class="mb-2">您应该在下面 “设置真身服务点” 指定服务点 URL 并完成真身验证，以便获得可信护照服务，登录应用网站需要可信护照。否则，你只能自行颁发自签护照，自签护照不是可信护照，只适用于少数网站。</p>
 <p class="mb-2">真身服务点完成真身验证后，将记录您的手机号与可公开真身账号，然后生成关联凭证。</p>
 
 <h2 class="mt-5 mb-4">设置真身服务点</h2>
@@ -213,7 +214,7 @@
 </div>
 
 <h2 class="mt-5 mb-4">设置通密服务点查询 URL</h2>
-<p class="mb-4">该 URL 用于让客户端机器发起请求获得通密服务点地址，申请绿卡需由通密服务点提供服务，本项取空值表示使用 FNS 官方提供查询点。</p>
+<p class="mb-4">该 URL 用于让客户端机器发起请求获得通密服务点地址列表，申请绿卡需由通密服务点提供服务，本项取空值表示使用 FNS 官方提供查询点。</p>
 <div class="input-group mb-3" style="width:340px">
   <span class="input-group-text">https://</span>
   <input type="text" class="form-control text-truncate" autocomplete="off" id="input-cryptohost">
@@ -223,6 +224,43 @@
   <button type="button" class="btn btn-success ms-2" id="btn-crypto-state">模拟测试</button>
 </div>
 </div>  <!-- end of #list-real -->
+
+<div class="tab-pane fade" id="list-selfsign" role="tabpanel">
+<h2 class="mb-4">关于自签护照</h2>
+<p class="mb-2">自签护照（self-signed passport）是用户自行签名的护照，因为不需第三方机构签名，它可以随时生成、随意更换，隐私性更好，但可信性欠佳。</p>
+<p class="mb-2">NAL 库始终配置一份自签护照，应用网站常用它表达当前用户的<strong>游客身份</strong>，您还可以指定昵称与头像。</p>
+
+<h2 class="mt-5 mb-4">当前自签护照</h2>
+<div class="alert alert-primary mb-3 text-break" role="alert">
+  <span>身份序号：</span><span id="my-selfsign-no"></span><br>
+  <span>身份公钥：</span><span id="my-selfsign-pub"></span><br>
+</div>
+
+<h2 class="mt-5 mb-4">更换自签护照</h2>
+<div class="input-group mb-3" style="width:340px">
+  <span class="input-group-text">序号</span>
+  <input type="text" class="form-control text-truncate shadow-none" autocomplete="off" placeholder="如果不指定将由系统随机生成" id="input-selfsign-no">
+</div>
+<div class="mb-3">
+  <button type="button" class="btn btn-primary" id="btn-set-selfsign">立即更换</button>
+</div>
+
+<h2 class="mt-5 mb-4">设置昵称与头像</h2>
+<p class="mb-3">为游客身份设置昵称与头像，建议您不在本页设置真实姓名与真实身份照片。</p>
+<div class="input-group mb-3" style="width:340px">
+  <span class="input-group-text">使用昵称</span>
+  <input type="text" class="form-control text-truncate shadow-none" autocomplete="off" id="input-selfsign-nick">
+</div>
+<div class="input-group mb-3" style="width:340px">
+  <input type="file" class="form-control shadow-none" id="input-select-avatar">
+</div>
+<div class="mb-3">
+  <img class="ms-1" style="width:200px; height:200px; border:1px solid #ccc" id="img-avatar">
+</div>
+<div class="mb-3">
+  <button type="button" class="btn btn-primary ms-1" id="btn-set-nick-avatar">保存</button>
+</div>
+</div>  <!-- end of #list-selfsign -->
 
 <div class="tab-pane fade" id="list-card" role="tabpanel">
 <h2 class="mb-4">卡证列表</h2>
@@ -947,8 +985,8 @@ function showHostingTask(task) {
     
     // $('#acc-alter').text('小号序号：' + info.alternate_off);
     // $('#dev-fp').text('设备指纹：' + info.figerprint);  // DEV-ACC
-    $('#did-fp').text('根身指纹：' + info.did_figerprint); // ALT-ACC
-    $('#did-pub').text('根身账号：' + info.did_pubkey);    // ALT-ACC
+    // $('#did-fp').text('根身指纹：' + info.did_figerprint); // ALT-ACC
+    // $('#did-pub').text('根身账号：' + info.did_pubkey);    // ALT-ACC
     $('#did-real').text('真身标识：' + info.did_realid);   // alt/0/0
     $('#real-fp').text('真身指纹：' + info.real_figerprint);
     $('#real-pub').text('真身账号：' + info.real_pubkey);
@@ -1179,6 +1217,7 @@ function initAppLayer(info) {
   
   // following will be defined later
   showRealAccount(info);
+  showSelfSignAcc(info);
   jumpHostcardPage(0,true);
   tryRenewWebList(true);
   tryRenewSignList(true);
@@ -1272,6 +1311,7 @@ function showRealAccount(info) {
 $( () => {
   $('#btn-set-realhost').on('click', ev => {
     let url = $('#input-realhost').val().trim();
+    if (url.slice(-1) == '/') url = url.slice(0,-1);
     NAL.call_('set_real_server',[NAL.swHost(),NAL.swMagic(),url]).then( res => {
       if (res && res.url)
         alert('更改成功');
@@ -1308,6 +1348,8 @@ $( () => {
     
     url = 'https://' + url;
     if (url.slice(-1) == '/') url = url.slice(0,-1);
+    
+    if (!confirm('停用真身服务后，您在该服点将无法申请护照，确认要继续执行停用吗？')) return;
     
     NAL.dialog('pass').then( psw => {
       NAL.call_('sign_disabling',[NAL.swHost(),NAL.swMagic(),psw]).then( res => {
@@ -1395,6 +1437,110 @@ $( () => {
         alert('调用返回：' + data);
       else alert('调用失败');
     });
+  });
+});
+</script>
+
+<script> //---- config selfsign account
+function showSelfSignAcc(info) {
+  $('#my-selfsign-no').text(info.selfsign_no+'');
+  $('#my-selfsign-pub').text(info.selfsign_pubkey);
+  
+  NAL.call_('nick_avatar',['200x200']).then( res => {
+    let nick = '', imgSrc = null;
+    if (res && typeof res.nickname == 'string') {
+      nick = res.nickname;
+      if (res.avatar) imgSrc = res.avatar;
+    }
+    if (!imgSrc) imgSrc = 'img/default_avatar.png';
+    
+    $('#input-selfsign-nick').val(nick);
+    $('#img-avatar').attr('src',imgSrc);
+  });
+}
+
+$( () => {
+  $('#btn-set-selfsign').on('click', ev => {
+    let no = 0;
+    let s = $('#input-selfsign-no').val().trim();
+    if (s) {
+      no = parseInt(s);
+      if (isNaN(no))
+        no = 0;
+      else no = no & 0x7fffffff;
+    }
+    
+    tempDisableBtn(ev.target);
+    NAL.call_('set_selfsign',[NAL.swHost(),NAL.swMagic(),no]).then( res => {
+      if (res && res.result === 'OK') {
+        $('#my-selfsign-no').text(res.selfsign_no+'');
+        $('#my-selfsign-pub').text(res.selfsign_pubkey);
+        alert('更换自签护照成功');
+      }
+      else {
+        if (typeof res == 'string')
+          alert('调用失败：' + res);
+        else alert('更换自签护照失败');
+      }
+    });
+  });
+  
+  $('#input-select-avatar').on('change', ev => {
+    if (typeof FileReader == 'undefined')
+      return alert('浏览器不支持 FileReader');
+    
+    var reader = new FileReader();
+    var aFile = ev.target.files[0];
+    
+    readOneFile(aFile, function(fContent,fName,fSize) {
+      if (fContent && fContent.slice(0,5) == 'data:' && fContent.slice(5,11) == 'image/') {
+        var imgNode = $('#img-avatar');
+        imgNode.attr('src',fContent);
+      }
+      else alert('未知格式，请选取图片文件');
+    },300);
+    
+    function readOneFile(aFile, callback) {
+      reader.onload = function(e) {
+        callback(this.result,aFile.name,aFile.size);
+      };
+      reader.readAsDataURL(aFile);
+    }
+  });
+  
+  $('#btn-set-nick-avatar').on('click', ev => {
+    let nick = $('#input-selfsign-nick').val().trim();
+    if (nick.length > 24) return alert('昵称太长');
+    
+    let imgNode = $('#img-avatar')[0];
+    let s200 = getAvatarImg(200,200,imgNode);
+    let s160 = getAvatarImg(160,160,imgNode);
+    let s120 = getAvatarImg(120,120,imgNode);
+    let s80 = getAvatarImg(80,80,imgNode);
+    let s48 = getAvatarImg(48,48,imgNode);
+    let s32 = getAvatarImg(32,32,imgNode);
+    
+    NAL.call_('set_nick_avatar',[NAL.swHost(),NAL.swMagic(),nick,s200,s160,s120,s80,s48,s32]).then( res => {
+      if (res && res.result === 'OK')
+        alert('保存配置成功');
+      else {
+        if (typeof res == 'string')
+          alert('保存失败：' + res);
+        else alert('保存失败');
+      }
+    });
+    
+    function getAvatarImg(wd, hi, imgNode) {
+      let cavNode = document.createElement('CANVAS');
+      cavNode.width = wd;
+      cavNode.height = hi;
+      
+      let ctx = cavNode.getContext('2d');
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0,0,cavNode.width,cavNode.height);
+      ctx.drawImage(imgNode,0,0,wd,hi);
+      return cavNode.toDataURL('image/jpeg',1); // 0.92
+    }
   });
 });
 </script>
