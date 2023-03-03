@@ -332,12 +332,18 @@ function enhanceFixKey(fixKey) {
 
 let vdfInstance = null;
 
-if (location.hostname != 'localhost') {  // no VDF when debugging at localhost
-  setTimeout( async () => {
+setTimeout( async () => {
+  let accInfo = await (await wallet_db).get('config','account');
+  if (accInfo?.real_admin_pubkey) {
+    REALNAME_PUBKEY = Buffer.from(accInfo.real_admin_pubkey,'hex');
+    REALNAME_FIGERPRINT = ripemdHash(REALNAME_FIGERPRINT).slice(0,4);
+  }
+  
+  if (location.hostname != 'localhost') {  // no VDF when debugging at localhost
     const createVdf = require('@subspace/vdf').default;
     vdfInstance = await createVdf();
-  }, 2000);
-}
+  }
+}, 2000);
 
 function enhanceFixKey(fixKey) {
   if (vdfInstance === null) return fixKey;
@@ -763,8 +769,8 @@ function ber_encode(buf, off, tag, arg, fmt) {
   return off + len;
 }
 
-const REALNAME_PUBKEY = Buffer.from('02bed0eafe1b0c1b71c2d2affc5e81fbfbf371acdc4a00c397397d17490b32e487','hex');
-const REALNAME_FIGERPRINT = ripemdHash(REALNAME_PUBKEY).slice(0,4);
+var REALNAME_PUBKEY = Buffer.from('028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624','hex');
+var REALNAME_FIGERPRINT = ripemdHash(REALNAME_PUBKEY).slice(0,4);
 
 const _tee_platform_pubkey = '03b9f785144303f5931525f223d5a73becce67eb50cb5757a7da473993c701678a';
 const _tee_product_pubkey  = '0294cd27375cf63ee9ee99d2d946dcab6ff7962fa4dc2bd6ee182ea090c93800b1';
@@ -796,6 +802,7 @@ function BipAccount() {
   let phone = null, figerprint = null;
   let alternate_no = null, alternate_off = 0;
   let didRoot = null, undisRoot = null, pswRoot = null, secureRoot = null, realRoot = null;
+  let did_realid = null;
   let selfsign_no = null, selfsign = null;
   let securebox_cipher = '';
   
@@ -813,6 +820,8 @@ function BipAccount() {
       realRoot = null;   // did/0/0
       pswRoot = null;    // psw/0'
       
+      did_realid = null;
+      
       selfsign_no = null;
       selfsign = null;
     },
@@ -827,6 +836,8 @@ function BipAccount() {
       realRoot = didRoot.derive(0).derive(0);
       undisRoot = didRoot.derive(alternate_no);
       secureRoot = undisRoot.derive(0);  // "alt/alternate/0" for securebox crypto
+      
+      did_realid = b36checkEncode(realRoot.publicKey,'rid1');
       
       selfsign_no = accInfo.selfsign_no;
       selfsign = realRoot.derive(selfsign_no);
@@ -861,7 +872,6 @@ function BipAccount() {
       
       let did_figerprint = figerprintOf(didRoot.publicKey);
       let real_figerprint = figerprintOf(realRoot.publicKey);
-      let did_realid = b36checkEncode(realRoot.publicKey,'rid1');
       return { figerprint, did_figerprint, real_figerprint, did_realid, selfsign_no,
         did_pubkey: didRoot.publicKey.toString('hex'),
         real_pubkey: realRoot.publicKey.toString('hex'),
@@ -933,31 +943,11 @@ function BipAccount() {
       return ret.toString(CryptoJS.enc.Hex);
     },
     
-    newPassport(isAcc20, sessType, realm, child, now, expiredTm) {
-      // step 1: caculate time related variables
-      let tmSegment, maxExpired, nowSec = parseInt((new Date()).valueOf()/1000);
-      if (!now)   // creating meta-passport
-        tmSegment = 0;
-      else tmSegment = Math.floor(nowSec / refresh_periods[sessType & 0x07]);
-      now = parseInt(nowSec / 60);  // by minutes
-      
-      maxExpired = now + 20150;  // by minutes, 14d - 10m, can not more than 14 days
-      if (typeof expiredTm == 'number') {
-        expiredTm = parseInt(expiredTm / 60);  // conver from seconds to minutes
-        expiredTm = Math.max(now+10,Math.min(maxExpired,expiredTm)); // now+10 means that should have 10 minutes
-      }
-      else expiredTm = maxExpired;
-      
-      // step 2: derive did/0/0/child
-      if (typeof child != 'number')
-        child = Math.floor(Math.random() * 0x7fffffff) + 1; // child != 0
-      child = child & 0x7fffffff;
-      let didAcc = realRoot.derive(child);
-      
-      // step 3: get realm, loginSession, rootCode
-      if (!realm) realm = 'nb-chain.cn';
+    _newPassport(isAcc20, realm, tmSegment, child, didAcc, now_tm, expiredTm,adminFP) {
+      // step 1: get realm, loginSession, rootCode
       realm = realm.replace(/[ <>=,"']/g,'');  // can not contain: space < > = , ' "
       realm = realm.slice(0,96);  // max keep 96 char
+      
       let realmUID = Buffer.concat([Buffer.from(realm+':'),realRoot.publicKey]);
       realmUID = CreateHash('sha256').update(realmUID).digest();
       let loginSess = ripemdHash(Buffer.concat([realmUID,Buffer.from(':'+tmSegment)])); // make loginSess20
@@ -965,11 +955,7 @@ function BipAccount() {
       let rootCode = Buffer.concat([realRoot.publicKey,Buffer.from(':'+child)]);
       rootCode = CreateHash('sha256').update(rootCode).digest().slice(0,4);
       
-      let now_tm = Buffer.allocUnsafe(5);
-      now_tm[0] = sessType & 0xff;
-      now_tm.writeUInt32BE(tmSegment==0?0:now,1);  // BE uint4 by minutes
-      
-      // step 4: setup passport content
+      // step 2: setup passport content
       let off = 0, buf = Buffer.allocUnsafe(192);
       buf[off++] = 112; buf[off++] = 115;  // header 'pspt'
       buf[off++] = 112; buf[off++] = 116;
@@ -981,15 +967,69 @@ function BipAccount() {
       off = ber_encode(buf,off,0xc2,rootCode);
       off = ber_encode(buf,off,0xc3,loginSess);
       off = ber_encode(buf,off,0xc8,realm);
-      off = ber_encode(buf,off,0xca,REALNAME_FIGERPRINT);
+      off = ber_encode(buf,off,0xca,adminFP);
       off = ber_encode(buf,off,0xcb,expiredTm,'BE');  // BE uint4 by minutes
       off = ber_encode(buf,off,0xcc,now_tm); // sessType1 + minutes4
       
-      // step 5: make client side signature
+      // step 3: make signature
       let body = buf.slice(0,off);
       let sig = CreateHash('sha256').update(body).digest();
       sig = ECC.sign(sig,didAcc.privateKey);
       return [child,body,sig,realm,expiredTm,didAcc.publicKey];
+    },
+    
+    newPassport(isAcc20, sessType, realm, child, now, expiredTm) {
+      // step 1: caculate time related variables
+      let tmSegment, maxExpired, nowSec = parseInt((new Date()).valueOf()/1000);
+      if (!now)   // creating meta-passport
+        tmSegment = 0;
+      else tmSegment = Math.floor(nowSec / refresh_periods[sessType & 0x07]);
+      now = parseInt(nowSec / 60);  // by minutes
+      
+      maxExpired = now + 20150;  // by minutes, 14d - 10m, can not more than 14 days
+      if (typeof expiredTm == 'number') {
+        expiredTm = parseInt(expiredTm / 60);  // conver from seconds to minutes
+        expiredTm = Math.max(now+10,Math.min(maxExpired,expiredTm)); // now+10 means that should at least have 10 minutes
+      }
+      else expiredTm = maxExpired;
+      
+      let now_tm = Buffer.allocUnsafe(5);
+      now_tm[0] = sessType & 0xff;
+      now_tm.writeUInt32BE(tmSegment==0?0:now,1);  // BE uint4 by minutes
+      
+      // step 2: derive did/0/0/child
+      if (typeof child != 'number')
+        child = Math.floor(Math.random() * 0x7fffffff) + 1; // child != 0
+      child = child & 0x7fffffff;
+      let didAcc = realRoot.derive(child);
+      
+      // step 3: setup passport
+      if (!realm) realm = '';
+      let ret = this._newPassport(isAcc20,realm,tmSegment,child,didAcc,now_tm,expiredTm,REALNAME_FIGERPRINT);
+      if (tmSegment == 0) ret.push(did_realid);
+      return ret;
+    },
+    
+    newSelfSignPspt(sessType, realm, expiredTm) {  // expiredTm is seconds or undefined
+      // step 1: caculate time related variables
+      let nowSec = parseInt((new Date()).valueOf()/1000);
+      let now = parseInt(nowSec / 60);  // by minutes
+      let tmSegment = Math.floor(nowSec / refresh_periods[sessType & 0x07]);
+      
+      maxExpired = now + 20150;  // by minutes, 14d - 10m, can not more than 14 days
+      if (typeof expiredTm == 'number') {
+        expiredTm = parseInt(expiredTm / 60);  // conver from seconds to minutes
+        expiredTm = Math.max(now+10,Math.min(maxExpired,expiredTm)); // now+10 means that should at least have 10 minutes
+      }
+      else expiredTm = maxExpired;
+      
+      let now_tm = Buffer.allocUnsafe(5);
+      now_tm[0] = sessType & 0xff;
+      now_tm.writeUInt32BE(now,1);  // BE uint4 by minutes
+      
+      // step 2: setup passport
+      let adminFP = ripemdHash(selfsign.publicKey).slice(0,4);
+      return this._newPassport(false,realm,tmSegment,selfsign_no,selfsign,now_tm,expiredTm,adminFP);
     },
     
     genGreencardCipher(adminPub, expireMins, card, suggestChild) {
@@ -1365,13 +1405,13 @@ self.addEventListener('message', async event => {
             let info = rootBip.newPassport(is_meta,sessType,host,child,is_meta?0:now);
             
             let accInfo = await db.get('config','account'); // accInfo must exist
-            let realIdx = hash256_d('REAL:'+accInfo.phone).toString('hex');
             let body = { passport:info[1].toString('hex'),
               self_sign:info[2].toString('hex'), expired:info[4]*60, child,
               pubkey:info[5].toString('hex') };
             let option = {method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'};
             
-            ret = await wait__(fetch('https://realname.nb-chain.cn/passport/'+realIdx,option),30000).then( res => {
+            let realUrl = 'https://' + (accInfo.real_sp || 'real.fn-share.com') + '/cards/pspt/' + info[6];
+            ret = await wait__(fetch(realUrl,option),30000).then( res => {
               if (res.status == 200)
                 return res.json();
               else return null;   // ignore other res.status
@@ -1840,6 +1880,22 @@ self.addEventListener('message', async event => {
       else event.source.postMessage(prefix+ret);
     }
     
+    else if (msg.cmd == 'selfsign_pspt') {
+      let ret;
+      if (!rootBip.hasInit())
+        ret = 'WAIT_PASS';
+      else {
+        let realm = msg.param[0], sessType = msg.param[1];
+        let expiredTm = msg.param[2]; // expiredTm is seconds or undefined
+        if (typeof realm != 'string') realm = '';
+        if (typeof sessType != 'number') sessType = 1;
+        
+        let info = rootBip.newSelfSignPspt(sessType,realm,expiredTm);
+        ret = {body:info[1].toString('hex'),signature:info[2].toString('hex'),pubkey:info[5].toString('hex')};
+      }
+      event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+    }
+    
     else if (msg.cmd == 'nick_avatar') {
       let ret = 'NONE', size = msg.param[0] || '200x200';
       let cfg = await (await wallet_db).get('config',NAL_WEBHOST);
@@ -2027,6 +2083,24 @@ self.addEventListener('message', async event => {
           ret = bipInfo;
         }
         
+        event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+      }
+      
+      else if (msg.cmd == 'set_real_admin') {
+        let ret = 'NONE', pubkey = msg.param[2];
+        if (cfg && typeof pubkey == 'string' && pubkey.length == 66) {
+          let pubkey2 = Buffer.from(pubkey,'hex');
+          if (pubkey2[0] == 2 || pubkey2[0] == 3) {
+            let accInfo = await db.get('config','account');
+            if (accInfo) {
+              accInfo.real_admin_pubkey = pubkey;
+              await db.put('config',accInfo);
+            }
+            REALNAME_PUBKEY = pubkey2;
+            REALNAME_FIGERPRINT = ripemdHash(pubkey2).slice(0,4);
+            ret = 'OK';
+          }
+        }
         event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
       }
       

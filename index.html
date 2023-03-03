@@ -221,7 +221,7 @@
 </div>
 <div class="mb-3">
   <button type="button" class="btn btn-primary" id="btn-set-cryptohost">保存 URL</button>
-  <button type="button" class="btn btn-success ms-2" id="btn-crypto-state">模拟测试</button>
+  <button type="button" class="btn btn-success ms-2" id="btn-crypto-state">模拟查询</button>
 </div>
 </div>  <!-- end of #list-real -->
 
@@ -1312,9 +1312,25 @@ $( () => {
   $('#btn-set-realhost').on('click', ev => {
     let url = $('#input-realhost').val().trim();
     if (url.slice(-1) == '/') url = url.slice(0,-1);
-    NAL.call_('set_real_server',[NAL.swHost(),NAL.swMagic(),url]).then( res => {
-      if (res && res.url)
-        alert('更改成功');
+    
+    wait__(fetch('https://' + url + '/rsp_admin_pubkey'),30000).then(res => {
+      if (res.status == 200)
+        return res.text();
+      else return null;
+    }, e => null).then( data => {
+      if (data && typeof data == 'string' && data.length == 66) {
+        NAL.call_('set_real_admin',[NAL.swHost(),NAL.swMagic(),data]).then( res2 => {
+          if (res2 === 'OK') {
+            NAL.call_('set_real_server',[NAL.swHost(),NAL.swMagic(),url]).then( res3 => {
+              if (res3 && res3.url)
+                alert('更改成功');
+              else alert('操作失败');
+            });
+          }
+          else alert('保存服务点管理员公钥失败');
+        });
+      }
+      else alert('查询真身服务点管理员公钥失败，请检查网络');
     });
   });
   
@@ -1327,7 +1343,7 @@ $( () => {
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
     tempDisableBtn(ev.target);
-    url_fetch(url+'/users/disabling?id='+curr_real_id, data => {
+    url_fetch(url+'/cards/disabling?id='+curr_real_id, data => {
       if (data === null || typeof data.state != 'number')
         alert('查询失败');
       else {
@@ -1361,8 +1377,8 @@ $( () => {
         }
         // else, res is {time,account,signature}
         
-        wait__(fetch(url+'/users/disabling',{method:'POST',body:JSON.stringify(res)}),
-        3000).then( res2 => {
+        wait__(fetch(url+'/cards/disabling',{method:'POST',body:JSON.stringify(res)}),
+        30000).then( res2 => {
           if (res2.status == 200)
             return res2.json();
           else {
@@ -1428,7 +1444,7 @@ $( () => {
     url = 'https://' + url;
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
-    wait__(fetch(url),3000).then( res => {
+    wait__(fetch(url),30000).then( res => {
       if (res.status == 200)
         return res.text();
       else return null;
