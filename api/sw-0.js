@@ -528,7 +528,7 @@ workbox.routing.registerRoute(   // pass_it?host=xx&realm=xx&psw=xx
 //----
 
 function safeCheckCard(flag, children, prefix, content) {
-  let child2 = null, child3 = null, isGNCD = len(children) == 3;
+  let child2 = null, child3 = null, isGNCD = children.length == 3;
   let child1 = children[0] & 0x7fffffff;  // take meta-pspt as generic-pspt
   if (isGNCD) {
     child2 = children[1] & 0x7fffffff;
