@@ -1233,7 +1233,7 @@ self.addEventListener('message', async event => {
               ret = 'NOT_LOGIN';
             else if (isLoginCmd) {
               child = child + '';
-              await (await wallet_db).put('wait_sign',{child+'',host,realm,content,request_tm,sign_tm});
+              await (await wallet_db).put('wait_sign',{child:child+'',host,realm,content,request_tm,sign_tm});
               ret = 'ADDED';
             }
             else {
