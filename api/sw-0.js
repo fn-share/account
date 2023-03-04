@@ -618,7 +618,7 @@ workbox.routing.registerRoute(
     card = Buffer.from(card,'hex');
     
     // step 2: check card
-    let desc = '', flag = card.slice(4,8).toString('utf-8');
+    let desc = '', flag = card.slice(12,16).toString('utf-8');
     if (flag != 'pspt' && flag != 'visa' && flag != 'gncd')
       desc = "\u9a8c\u8bc1\u5931\u8d25\uff1a\u672a\u77e5\u5361\u8bc1\u683c\u5f0f"; // unknown card type
     else {
