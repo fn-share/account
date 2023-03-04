@@ -653,6 +653,14 @@ workbox.routing.registerRoute(
 
 //--------
 
+const EMPTY_STRING = Buffer.alloc(32,0);
+
+var REALNAME_PUBKEY = Buffer.from('028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624','hex');
+var REALNAME_FIGERPRINT = ripemdHash(REALNAME_PUBKEY).slice(0,4);
+
+const _tee_platform_pubkey = '03b9f785144303f5931525f223d5a73becce67eb50cb5757a7da473993c701678a';
+const _tee_product_pubkey  = '0294cd27375cf63ee9ee99d2d946dcab6ff7962fa4dc2bd6ee182ea090c93800b1';
+
 function generateRand(num) {
   let ret = Buffer.alloc(num,0);
   for (let i=0; i < num; i++) {
@@ -724,7 +732,7 @@ function b36checkEncode(payload, prefix) {
   return prefix + base36.encode(Buffer.concat([ha,code4]));
 }
 
-var is_array = function(v) { 
+const is_array = function(v) { 
   return v && typeof v === 'object' && typeof v.length === 'number' && 
     typeof v.splice === 'function' && !(v.propertyIsEnumerable('length')); 
 };
@@ -769,12 +777,6 @@ function ber_encode(buf, off, tag, arg, fmt) {
   return off + len;
 }
 
-var REALNAME_PUBKEY = Buffer.from('028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624','hex');
-var REALNAME_FIGERPRINT = ripemdHash(REALNAME_PUBKEY).slice(0,4);
-
-const _tee_platform_pubkey = '03b9f785144303f5931525f223d5a73becce67eb50cb5757a7da473993c701678a';
-const _tee_product_pubkey  = '0294cd27375cf63ee9ee99d2d946dcab6ff7962fa4dc2bd6ee182ea090c93800b1';
-
 function wait__(promise_obj, wait) {
   let abort_fn = null;
   let abortable_promise = Promise.race([ promise_obj,
@@ -795,6 +797,16 @@ function gen_ecdh_key(pubkey33, re_gen) {
   let flag = pubKeyPoint[64] & 0x01;
   let targ_x = ECDH.computeSecret(pubkey33);
   return [flag, nonce_x, targ_x];
+}
+
+function scanCardTag(card, tag) {
+  let off = 4, n = card.length;
+  while (off < n) {
+    let t = card[off], len = card[off+1];
+    if (t === tag) return card.slice(off+2,off+2+len);
+    off += (2+len);
+  }
+  return null;  // not found
 }
 
 function BipAccount() {
@@ -1032,32 +1044,55 @@ function BipAccount() {
       return this._newPassport(false,realm,tmSegment,selfsign_no,selfsign,now_tm,expiredTm,adminFP);
     },
     
-    genGreencardCipher(adminPub, expireMins, card, suggestChild) {
-      let child2, child1 = card.child & 0x7fffffff;
-      if (suggestChild)
-        child2 = suggestChild & 0x7fffffff;
-      else child2 = Math.floor(Math.random()*0x7fffffff) + 1;  // child2 != 0
+    genGreencardCipher(adminPub, expireMins, visaCard, suggestChild, 
+           realHost, callback) { // suggestChild is null or string
+      let child1 = parseInt(visaCard.child) & 0x7fffffff;
+      let child2 = Math.floor(Math.random()*0x7fffffff) + 1;
+      let child3 = Math.floor(Math.random()*0x7fffffff) + 1; 
+      if (suggestChild) {
+        let b = suggestChild.split(',');
+        if (b.length == 2) {  // can reuse old one
+          child2 = parseInt(b[0]) & 0x7fffffff;
+          child3 = parseInt(b[1]) & 0x7fffffff;
+        }
+      }
       
-      let rootCode2 = Buffer.concat([realRoot.publicKey,Buffer.from(':-'+child2)]);
-      rootCode2 = CreateHash('sha256').update(rootCode2).digest().slice(0,4);
+      let ownerAcc = realRoot.derive(child1);
+      ownerAcc.chainCode = EMPTY_STRING;
+      let targAcc = ownerAcc.derive(child2).derive(child3);
       
-      let child2pub = undisRoot.derive(child2).publicKey;
+      let rootcode = Buffer.concat([ownerAcc.publicKey,Buffer.from(':'+child2+'/'+child3)]);
+      rootcode = CreateHash('sha256').update(rootcode).digest().slice(0,4);
+      let now_tm = Math.floor((new Date()).valueOf() / 60000);  // by minutes
       
-      let bufAlter = Buffer.alloc(4,0);
-      let bufChild1 = Buffer.alloc(4,0);
-      let bufChild2 = Buffer.alloc(4,0);
-      let bufNow = Buffer.alloc(4,0);
-      let bufExpired = Buffer.alloc(4,0);
       let bufCard = Buffer.from(card.content,'hex');
+      let cipherSize = 86 + bufCard.length;
+      let padding = cipherSize % 16;
+      if (padding) padding = (16 - padding);
       
-      let now = Math.floor((new Date()).valueOf() / 60000);  // by minutes
+      let authExpired = scanCardTag(bufCard,0xcb);  // TAG_CERT_EXPIRED, by minutes
+      if (authExpired) {
+        authExpired = bufCard.ReadUInt32BE(authExpired+2);
+        if (expireMins > authExpired) expireMins = authExpired;
+      }
+      let maxAuth = scanCardTag(bufCard,0xcf);  // TAG_MAX_AUTH_TIME, by minutes
+      if (maxAuth) {
+        maxAuth = now_tm + bufCard.ReadUInt32BE(maxAuth+2);
+        if (expireMins > maxAuth) expireMins = maxAuth;
+      }
       
-      bufAlter.writeUInt32LE(alternate_no,0);
-      bufChild1.writeUInt32LE(child1,0);  // child1 come from passport
-      bufChild2.writeUInt32LE(child2,0);  // child2 is target undisclosed account
-      bufNow.writeUInt32LE(now,0);
-      bufExpired.writeUInt32LE(expireMins,0);
+      let off = 0, cipherBuf = Buffer.alloc(cipherSize+padding,0);
+      targAcc.publicKey.copy(cipherBuf,off); off += 33; // copy(targBuffer,targStart,sourStart,sourEnd)
+      adminPub.copy(cipherBuf,off); off += 33;
+      rootcode.copy(cipherBuf,off); off += 4;
+      cipherBuf.writeUInt32BE(child2,off); off += 4;
+      cipherBuf.writeUInt32BE(child3,off); off += 4;
+      cipherBuf.writeUInt32BE(now_tm,off); off += 4;
+      cipherBuf.writeUInt32BE(expireMins,off); off += 4;
+      bufCard.copy(cipherBuf,off); off += bufCard.length;
+      if (padding) generateRand(padding).copy(cipherBuf,off);
       
+      // encrypt cipherBuf
       ECDH.generateKeys();
       let tmpKey = ECDH.getPrivateKey();
       let r_plt = gen_ecdh_key(Buffer.from(_tee_platform_pubkey,'hex'),false); // [flag,nonce,k_iv]
@@ -1069,12 +1104,31 @@ function BipAccount() {
       if (gncd_fetch_keys.length > 3)  // max hold 3 items
         gncd_fetch_keys.splice(0,gncd_fetch_keys.length - 3);
       
-      let msg = Buffer.concat([ didRoot.publicKey, didRoot.chainCode, adminPub, rootCode2,
-        bufAlter, bufChild1, bufChild2, bufNow, bufExpired, bufCard ]);
-      msg = encryptMsg(r_plt[2],msg);
-      msg = encryptMsg(r_pdt[2],msg);
+      cipherBuf = encryptMsg(r_plt[2],cipherBuf);
+      cipherBuf = encryptMsg(r_pdt[2],cipherBuf);
       
-      return [child1,child2,child2pub,tmpPub+msg.toString()];
+      info = [now_tm,child1,child2,child3,targAcc.publicKey,rootcode,tmpPub+cipherBuf.toString()];
+      
+      if (realHost) {  // need report
+        let reportPath = Buffer.alloc(12,0);
+        reportPath.writeUInt32BE(child1,0);
+        reportPath.writeUInt32BE(child2,4);
+        reportPath.writeUInt32BE(child3,8);
+        let body = {rid:did_realid,path:reportPath.toString('hex'),rootcode:rootcode.toString('hex')};
+        
+        let url = 'https://' + realHost + '/cards/report';
+        wait__( fetch(url,{method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'}),
+        5000).then( res => {
+          if (res.status == 200)
+            return res.json();
+          else return null;
+        }, e => null).then( res2 => {
+          if (res2 && res2.result == 'OK')
+            callback(info);
+          else callback(null)
+        });
+      }
+      else callback(info);
     },
     
     decryptGreencard(pubkey, content) {  // content should be base64 string
@@ -1525,7 +1579,7 @@ self.addEventListener('message', async event => {
         adminPub = Buffer.from(adminPub,'hex');
         
         if (adminPub.length == 33 && typeof expireMins == 'number') {
-          let card = await db.get('recent_cards',[host,'visa',role,child]);
+          let card = await db.get('recent_cards',[host,'visa',role,child+'']);
           if (card) {
             if (typeof reuseMins != 'number') {
               let sessType = cfg.strategy?.session_type;
@@ -1535,7 +1589,8 @@ self.addEventListener('message', async event => {
               else reuseMins = 2880; // 2880 minutes is 2 days, 0 for no reuse
             }
             
-            let suggestChild = 0;  // default 0 means generating new one
+            let suggestPre = child + ',';
+            let suggestChild = null;  // default null means generating new one
             if (reuseMins) {
               let now = Math.floor((new Date()).valueOf() / 1000);
               let range = IDBKeyRange.upperBound([host,0-now+reuseMins*60]);
@@ -1543,23 +1598,30 @@ self.addEventListener('message', async event => {
               
               for (let i=0; i < items.length; i++) {
                 let item = items[i];
-                if (item.flag == 'gncd') {
+                if (item.flag == 'gncd' && item.child.indexOf(suggestPre) == 0) {
                   if (item.role === role) { // same role, meet best one
-                    suggestChild = item.child;
+                    suggestChild = item.child.slice(suggestPre.length);
                     break;
                   }
                   else {
-                    if (!suggestChild) // try first matched
-                      suggestChild = item.child;
+                    if (!suggestChild)  // try first matched
+                      suggestChild = item.child.slice(suggestPre.length);
                   }
                 }
               }
             }
             
-            let info = rootBip.genGreencardCipher(adminPub,expireMins,card,suggestChild);
-            if (info)
-              ret = {child1:info[0],child2:info[1],pubkey2:info[2].toString('hex'),cipher:info[3]};
-            else ret = 'SYS_ERROR';
+            let accInfo = await db.get('config','account');
+            let realHost = accInfo.real_sp || DEFAULT_REAL_SERVER; // not null, will report to RSP
+            rootBip.genGreencardCipher(adminPub,expireMins,card,
+              suggestChild,realHost, info => {
+              if (info) { // [now_tm,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
+                ret = {child1:info[1],child2:info[2],child3:info[3],pubkey:info[4].toString('hex'),cipher:info[6]};
+              }
+              else ret = 'NETWORK_ERROR';
+              event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+            });
+            return;  // would reply in previous callback
           }
           else ret = 'NO_CARD';
         }
