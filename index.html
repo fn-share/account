@@ -1343,9 +1343,18 @@ $( () => {
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
     tempDisableBtn(ev.target);
-    url_fetch(url+'/cards/disabling?id='+curr_real_id, data => {
-      if (data === null || typeof data.state != 'number')
-        alert('查询失败');
+    wait__(fetch(url+'/cards/disabling?id='+curr_real_id),30000).then( res => {
+      if (res.status == 200)
+        return res.json();
+      else if (res.status == 400)
+        return res.text();
+      else return null;
+    }, e => null).then( data => {
+      if (data === null || typeof data?.state != 'number') {
+        if (typeof data == 'string')
+          alert('查询失败：' + data);
+        else alert('查询失败');
+      }
       else {
         if (data.state === 0)
           alert('真身服务状态正常');

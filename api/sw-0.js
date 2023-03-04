@@ -443,7 +443,7 @@ async function passNalAuth(db, targHost, targRealm) {
     if (targSegm.length == 2 && targSegm[1] == 'login') {
       let limitSec = (cfg2.strategy.session_limit+1) * refresh_periods[cfg2.strategy.session_type&0x07];
       cfg2.login_role = targRole;
-      cfg2.login_child = info.child;  // if child < 0 means login by green card, if >=0x80000000 means login by meta passport
+      cfg2.login_child = info.child;  // 'child1,child2,child3' means login by green card, if 'child1' and child1 >=0x80000000 means login by meta passport
       cfg2.login_pubkey = info.pubkey;
       cfg2.login_time = Math.floor((new Date()).valueOf() / 1000);
       cfg2.login_expired = cfg2.login_time + limitSec;
@@ -527,12 +527,18 @@ workbox.routing.registerRoute(   // pass_it?host=xx&realm=xx&psw=xx
 
 //----
 
-function safeCheckCard(flag, child, prefix, content) {
-  if (child >= 0x80000000) child = child - 0x80000000; // take meta-pspt as generic-pspt
+function safeCheckCard(flag, children, prefix, content) {
+  let child2 = null, child3 = null, isGNCD = len(children) == 3;
+  let child1 = children[0] & 0x7fffffff;  // take meta-pspt as generic-pspt
+  if (isGNCD) {
+    child2 = children[1] & 0x7fffffff;
+    child3 = children[2] & 0x7fffffff;
+  }
   
   // step 1: check card flag
   let card = typeof content == 'string'? Buffer.from(content,'hex'): content;
   if (card.slice(0,4).toString('utf-8') !== flag) return 'INVALID_FLAG';
+  if (isGNCD && flag != 'gncd') return 'INVALID_FLAG';
   
   // step 2: decode related fields in card
   let off = 4, n = card.length;
@@ -560,34 +566,44 @@ function safeCheckCard(flag, child, prefix, content) {
   if (rootcode == null || realm === null || expired === null) return 'FIELD_MISMATCH';
   
   // step 3: check realm
-  if (realm != prefix && realm.indexOf(prefix+'+') != 0)
-    return 'INVALID_REALM';   // prefix mismatch
+  if (prefix) {
+    if (realm != prefix && realm.indexOf(prefix+'+') != 0)
+      return 'INVALID_REALM';   // prefix mismatch
+  }
+  // else, no need check realm
   
   // step 4: check rootcode
-  let realPub33 = rootBip.getDidPubkey(null);
-  if (!realPub33) return 'WAIT_PASS';
-  
-  let child2 = flag == 'gncd'? -child: child;
-  let codeHa = CreateHash('sha256').update(realPub33).update(Buffer.from(':'+child2)).digest();
-  if (rootcode != codeHa.slice(0,4).toString('hex'))
-    return 'ROOTCODE_MISMATCH';
+  if (isGNCD) {
+    let ownerPub33 = rootBip.getDidPubkey(child1);
+    if (!ownerPub33) return 'WAIT_PASS';
+    let codeHa = CreateHash('sha256').update(ownerPub33).update(Buffer.from(':'+child2+'/'+child3)).digest();
+    if (rootcode != codeHa.slice(0,4).toString('hex'))
+      return 'ROOTCODE_MISMATCH';
+  }
+  else {
+    let ownerPub33 = rootBip.getDidPubkey(null);
+    if (!ownerPub33) return 'WAIT_PASS';
+    let codeHa = CreateHash('sha256').update(ownerPub33).update(Buffer.from(':'+child1)).digest();
+    if (rootcode != codeHa.slice(0,4).toString('hex'))
+      return 'ROOTCODE_MISMATCH';
+  }
   
   // step 5: check account
   let role = realm.split('+')[1] || '';
-  if (flag == 'gncd') {
-    return [rootBip.getDidPubkey(child2).toString('hex'),expired.readUInt32BE(0),role];
+  if (isGNCD) {
+    return [rootBip.getDidPubkey([child1,child2,child3]).toString('hex'),expired.readUInt32BE(0),role];
   }
   else {
-    let pubkey = rootBip.getDidPubkey(child);
+    let targPubkey = rootBip.getDidPubkey(child1);
     if (account && account.length == 40) {
-      if (ripemdHash(pubkey).toString('hex') != account)
+      if (ripemdHash(targPubkey).toString('hex') != account)
         return 'PUBKEY_MISMATCH';
     }
     else {
-      if (account && pubkey.toString('hex') != account) // account should be pubkey33
+      if (account && targPubkey.toString('hex') != account) // account should be pubkey33
         return 'PUBKEY_MISMATCH'; // pubkey33 mismatch
     }
-    return [pubkey.toString('hex'),expired.readUInt32BE(0),role];
+    return [targPubkey.toString('hex'),expired.readUInt32BE(0),role];
   }
 }
 
@@ -616,11 +632,19 @@ workbox.routing.registerRoute(
     }
     
     if (!desc) {
-      let child = card.readUInt32BE(0);
-      if (flag == 'gncd') child = -child;
-      card = card.slice(4,-4);  // child4 + card_content + crc4
+      let child1 = card.readUInt32BE(0), child2 = null, child3 = null;
+      let child, children = [child1];
+      if (flag == 'gncd') {
+        child2 = card.readUInt32BE(4);
+        child3 = card.readUInt32BE(8);
+        children.push(child2,child3);
+        child = child1 + ',' + child2 + ',' + child3;
+      }
+      else child = child1 + '';
       
-      let info = safeCheckCard(flag,child,host,card);
+      card = card.slice(12,-4);  // child12 + card_content + crc4
+      
+      let info = safeCheckCard(flag,children,host,card);
       if (typeof info == 'string')
         desc = "\u9a8c\u8bc1\u5931\u8d25\uff1a" + info; // verify fail
       else {
@@ -896,11 +920,20 @@ function BipAccount() {
       if (!pswRoot) return null;  // not init yet
       if (child === null) return realRoot.publicKey;
       
-      if (child < 0)
-        return undisRoot.derive(-child).publicKey;
-      else if (child >= 0x80000000)
-        return realRoot.derive(child - 0x80000000).publicKey;
-      else return realRoot.derive(child).publicKey;
+      if (typeof child == 'number')
+        return realRoot.derive(child & 0x7fffffff).publicKey;
+      else { // child must be array
+        let ret = realRoot.derive(child[0] & 0x7fffffff);
+        let child2 = child[1];
+        if (typeof child2 == 'number') {
+          ret.chainCode = EMPTY_STRING;
+          ret = ret.derive(child2 & 0x7fffffff);
+          let child3 = child[2];
+          if (typeof child3 == 'number')
+            ret = ret.derive(child3 & 0x7fffffff);
+        }
+        return ret.publicKey;
+      }
     },
     
     signDisabling(tm) {
@@ -923,14 +956,13 @@ function BipAccount() {
     },
     
     sessionSign(child, host, realm, ctx) {
-      let didAcc;
-      if (child < 0) {
-        child = (-child) & 0x7fffffff;
-        didAcc = undisRoot.derive(child);
-      }
-      else {
-        child = child & 0x7fffffff;  // child >= 0x80000000 means meta-passport
-        didAcc = realRoot.derive(child);
+      let b = child.split(',');  // ['child1'] or ['child1','child2','child3']
+      let child1 = parseInt(b[0]) & 0x7fffffff;  // child1 >= 0x80000000 means meta-passport
+      let didAcc = realRoot.derive(child1);
+      if (b.length == 3) {
+        let child2 = parseInt(b[1]) & 0x7fffffff;
+        let child3 = parseInt(b[2]) & 0x7fffffff;
+        didAcc = didAcc.derive(child2).derive(child3);
       }
       
       let s = host + '+' + realm;
@@ -1109,7 +1141,7 @@ function BipAccount() {
       
       info = [now_tm,child1,child2,child3,targAcc.publicKey,rootcode,tmpPub+cipherBuf.toString()];
       
-      if (realHost) {  // need report
+      if (realHost) {  // need report to RSP
         let reportPath = Buffer.alloc(12,0);
         reportPath.writeUInt32BE(child1,0);
         reportPath.writeUInt32BE(child2,4);
@@ -1195,15 +1227,17 @@ self.addEventListener('message', async event => {
             let targSegm = realm.split('+');
             let isLoginCmd = targSegm.length == 2 && targSegm[1] == 'login';
             if (!child)  // child=0 is reserved
-              child = isLoginCmd? 1: cfg.login_child;
+              child = isLoginCmd? '1': cfg.login_child;
             
             if (!child)
               ret = 'NOT_LOGIN';
             else if (isLoginCmd) {
-              await (await wallet_db).put('wait_sign',{child,host,realm,content,request_tm,sign_tm});
+              child = child + '';
+              await (await wallet_db).put('wait_sign',{child+'',host,realm,content,request_tm,sign_tm});
               ret = 'ADDED';
             }
             else {
+              child = child + '';
               let role = targSegm[0], action = targSegm[1];
               let roleInfo = cfg.strategy.roles[role];
               let actionLv = action && cfg.strategy.actions[action];
@@ -1370,7 +1404,7 @@ self.addEventListener('message', async event => {
             if (item.flag == 'pspt') {
               if (!psptAlso) return;
               
-              if (item.child >= 0x80000000) {  // is meta passport
+              if (parseInt(item.child) >= 0x80000000) {  // is meta passport
                 if (item.expired > metaExpired)
                   ret.push(item);
               }
@@ -1435,11 +1469,11 @@ self.addEventListener('message', async event => {
         for (let i=0; i < items.length; i++) {
           let item = items[i];
           if (item.flag == 'pspt') {
-            if (is_meta && item.child >= 0x80000000 && item.expired > metaExpired) {
+            if (is_meta && parseInt(item.child) >= 0x80000000 && item.expired > metaExpired) {
               card = item;
               break;
             }
-            else if (!is_meta && item.child < 0x80000000) {
+            else if (!is_meta && parseInt(item.child) < 0x80000000) {
               card = item;
               break;
             }
@@ -1448,7 +1482,7 @@ self.addEventListener('message', async event => {
         
         if (card) {
           ret = { state:'OLD_PSPT', content:card.content, realm:host, 
-            child:card.child & 0x7fffffff, pubkey:card.pubkey,
+            child:parseInt(card.child) & 0x7fffffff, pubkey:card.pubkey,
             expired:card.expired, is_meta };
         }
         else {  // !card
@@ -1460,7 +1494,7 @@ self.addEventListener('message', async event => {
             
             let accInfo = await db.get('config','account'); // accInfo must exist
             let body = { passport:info[1].toString('hex'),
-              self_sign:info[2].toString('hex'), expired:info[4]*60, child,
+              self_sign:info[2].toString('hex'), expired:info[4]*60, child, // child is number
               pubkey:info[5].toString('hex') };
             let option = {method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'};
             
@@ -1478,14 +1512,14 @@ self.addEventListener('message', async event => {
                 let child2 = body.child;  // body.child is 1~0x7fffffff
                 if (is_meta) child2 += 0x80000000;
                 
-                let info2 = safeCheckCard('pspt',child2,host,passport);
+                let info2 = safeCheckCard('pspt',[child2],host,passport);
                 if (typeof info2 == 'string')
                   return info2;  // meet error
                 else {
                   let pubkey = info2[0];
                   let expired = info2[1] * 60;
                   let save_tm = Math.floor((new Date()).valueOf() / 1000);
-                  let card2 = { host, flag:'pspt', role:'', child:child2,
+                  let card2 = { host, flag:'pspt', role:'', child:child2+'',
                     pubkey, referrer:'', content:passport, save_tm, expired:0-expired };
                   db.put('recent_cards',card2); // no waiting
                   
@@ -1508,7 +1542,7 @@ self.addEventListener('message', async event => {
       let role = msg.param[4], child = msg.param[5];
       if ( host === NAL_WEBHOST && typeof targHost == 'string' && targHost &&
            (flag === 'pspt' || flag === 'visa' || flag === 'gncd') &&
-           typeof role == 'string' && typeof child == 'number' ) {
+           typeof role == 'string' && typeof child == 'string' ) {
         cfg = await (await wallet_db).get('config',host);
         if (cfg && cfg.sw_magic !== magic) cfg = null;
       }
@@ -1527,7 +1561,7 @@ self.addEventListener('message', async event => {
       let role = msg.param[3], child = msg.param[4], content = msg.param[5];
       let referrer = msg.param[6] || '', comefrom = msg.param[7] || '';
       
-      if ( typeof host == 'string' && host && typeof role == 'string' && typeof child == 'number' &&
+      if ( typeof host == 'string' && host && typeof role == 'string' && typeof child == 'string' &&
            (flag === 'pspt' || flag === 'visa' || flag === 'gncd') &&
            typeof content == 'string' && content ) {
         cfg = await (await wallet_db).get('config',host);
@@ -1540,7 +1574,12 @@ self.addEventListener('message', async event => {
       }
       
       if (cfg) {
-        let info = safeCheckCard(flag,child,role?host+'+'+role:host,content);
+        let children = child.split(',');
+        children[0] = parseInt(children[0]);
+        if (children[1]) children[1] = parseInt(children[1]);
+        if (children[2]) children[2] = parseInt(children[2]);
+        
+        let info = safeCheckCard(flag,children,role?host+'+'+role:host,content);
         if (typeof info == 'string')
           ret = info
         else {
@@ -1562,6 +1601,7 @@ self.addEventListener('message', async event => {
       let ret = 'NONE', cfg = null;
       let host = msg.param[0], magic = msg.param[1], role = msg.param[2];
       let child = msg.param[3], adminPub = msg.param[4];
+      if (child) child = parseInt(child);  // ensure be number
       let db = await wallet_db;
       
       if (!rootBip.hasInit())
