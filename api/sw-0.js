@@ -334,7 +334,6 @@ let vdfInstance  = null;
 let REAL_MANAGER = null;
 
 function setupRealManagers(info) {
-  console.log('here',JSON.stringify(info));
   let tmp = { type:info.type||''};
   tmp.rsp_admin_pubkey = Buffer.from(info.rsp_admin_pubkey,'hex');
   tmp.rsp_admin_fp = ripemdHash(tmp.rsp_admin_pubkey).slice(0,4);
@@ -1131,8 +1130,8 @@ function BipAccount() {
       // encrypt cipherBuf
       ECDH.generateKeys();
       let tmpKey = ECDH.getPrivateKey();
-      let r_plt = gen_ecdh_key(REAL_MANAGER.cps_plt_pubkey,false); // [flag,nonce,k_iv]
-      let r_pdt = gen_ecdh_key(REAL_MANAGER.cps_pdt_pubkey,false);
+      let r_plt = gen_ecdh_key(REAL_MANAGER.csp_plt_pubkey,false); // [flag,nonce,k_iv]
+      let r_pdt = gen_ecdh_key(REAL_MANAGER.csp_pdt_pubkey,false);
       ECDH.generateKeys();  // erase for safty
       
       tmpPub = (r_plt[0]?'03':'02') + r_plt[1].toString('hex');
@@ -1911,8 +1910,8 @@ self.addEventListener('message', async event => {
       
       accInfo.real_manager = { type:'',
         'rsp_admin_pubkey':'028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
-        'cps_plt_pubkey':'03d72fa51f87d007a9c98e858bb057cb4e280ee1c8d97516af96ec1c9e13d63c36',
-        'cps_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
+        'csp_plt_pubkey':'03d72fa51f87d007a9c98e858bb057cb4e280ee1c8d97516af96ec1c9e13d63c36',
+        'csp_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
       };
       await db.put('config',accInfo);
       REAL_MANAGER = setupRealManagers(accInfo.real_manager);
