@@ -334,6 +334,7 @@ let vdfInstance  = null;
 let REAL_MANAGER = null;
 
 function setupRealManagers(info) {
+  console.log('here',JSON.stringify(info));
   let tmp = { type:info.type||''};
   tmp.rsp_admin_pubkey = Buffer.from(info.rsp_admin_pubkey,'hex');
   tmp.rsp_admin_fp = ripemdHash(tmp.rsp_admin_pubkey).slice(0,4);
