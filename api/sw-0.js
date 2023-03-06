@@ -1641,12 +1641,13 @@ self.addEventListener('message', async event => {
                   if (hexCard) {
                     let save_tm = Math.floor((new Date()).valueOf() / 1000);
                     let expired = 0 - info[1] * 60;
+                    let targ_pubkey = info[5].toString('hex');
                     let cardRec = { host,role,save_tm,expired, flag:'gncd',
                       child: info[2] + ',' + info[3] + ',' + info[4],
-                      pubkey: info[5].toString('hex'), content: hexCard }
-                    await db.put('recent_cards',cardRec);
+                      pubkey:info[5].toString('hex'), content:hexCard };
+                    db.put('recent_cards',cardRec); // no waiting
                     
-                    ret = {expired:info[1],child:info[2]+'',targ_pubkey:info[5].toString('hex'),card:hexCard};
+                    ret = {expired:info[1],child:info[2]+'',targ_pubkey,card:hexCard};
                   }
                   else ret = 'UNKNOWN_CARD';
                 }
