@@ -330,14 +330,24 @@ function enhanceFixKey(fixKey) {
   return ha.digest();
 } */
 
-let vdfInstance = null;
+let vdfInstance  = null;
+let REAL_MANAGER = null;
+
+function setupRealManagers(info) {
+  let tmp = { type:info.type||''};
+  tmp.rsp_admin_pubkey = Buffer.from(info.rsp_admin_pubkey,'hex');
+  tmp.rsp_admin_fp = ripemdHash(tmp.rsp_admin_pubkey).slice(0,4);
+  tmp.csp_plt_pubkey = Buffer.from(info.csp_plt_pubkey,'hex');
+  tmp.csp_plt_fp = ripemdHash(tmp.csp_plt_pubkey).slice(0,4);
+  tmp.csp_pdt_pubkey = Buffer.from(info.csp_pdt_pubkey,'hex');
+  tmp.csp_pdt_fp = ripemdHash(tmp.csp_pdt_pubkey).slice(0,4);
+  return tmp;
+}
 
 setTimeout( async () => {
   let accInfo = await (await wallet_db).get('config','account');
-  if (accInfo?.real_admin_pubkey) {
-    REALNAME_PUBKEY = Buffer.from(accInfo.real_admin_pubkey,'hex');
-    REALNAME_FIGERPRINT = ripemdHash(REALNAME_FIGERPRINT).slice(0,4);
-  }
+  if (accInfo?.real_admin_pubkey)
+    REAL_MANAGER = setupRealManagers(accInfo);
   
   if (location.hostname != 'localhost') {  // no VDF when debugging at localhost
     const createVdf = require('@subspace/vdf').default;
@@ -653,7 +663,7 @@ workbox.routing.registerRoute(
         let expired = info[1] * 60;
         let role = info[2];
         let save_tm = Math.floor((new Date()).valueOf() / 1000);
-        let card2 = {host,flag,role,child,pubkey,referrer:'',content:card.toString('hex'),save_tm,expired:0-expired};
+        let card2 = {host,flag,role,child,pubkey,content:card.toString('hex'),save_tm,expired:0-expired};
         if (comefrom) card2.comefrom = comefrom;
         
         await (await wallet_db).put('recent_cards',card2);
@@ -678,12 +688,6 @@ workbox.routing.registerRoute(
 //--------
 
 const EMPTY_STRING = Buffer.alloc(32,0);
-
-var REALNAME_PUBKEY = Buffer.from('028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624','hex');
-var REALNAME_FIGERPRINT = ripemdHash(REALNAME_PUBKEY).slice(0,4);
-
-const _tee_platform_pubkey = '03b9f785144303f5931525f223d5a73becce67eb50cb5757a7da473993c701678a';
-const _tee_product_pubkey  = '0294cd27375cf63ee9ee99d2d946dcab6ff7962fa4dc2bd6ee182ea090c93800b1';
 
 function generateRand(num) {
   let ret = Buffer.alloc(num,0);
@@ -1076,8 +1080,7 @@ function BipAccount() {
       return this._newPassport(false,realm,tmSegment,selfsign_no,selfsign,now_tm,expiredTm,adminFP);
     },
     
-    genGreencardCipher(adminPub, expireMins, visaCard, suggestChild, 
-           realHost, callback) { // suggestChild is null or string
+    genGreencardCipher(adminPub, expireMins, visaCard, suggestChild, realHost, callback) { // suggestChild is null or string
       let child1 = parseInt(visaCard.child) & 0x7fffffff;
       let child2 = Math.floor(Math.random()*0x7fffffff) + 1;
       let child3 = Math.floor(Math.random()*0x7fffffff) + 1; 
@@ -1127,19 +1130,19 @@ function BipAccount() {
       // encrypt cipherBuf
       ECDH.generateKeys();
       let tmpKey = ECDH.getPrivateKey();
-      let r_plt = gen_ecdh_key(Buffer.from(_tee_platform_pubkey,'hex'),false); // [flag,nonce,k_iv]
-      let r_pdt = gen_ecdh_key(Buffer.from(_tee_product_pubkey,'hex'),false);
+      let r_plt = gen_ecdh_key(REAL_MANAGER.cps_plt_pubkey,false); // [flag,nonce,k_iv]
+      let r_pdt = gen_ecdh_key(REAL_MANAGER.cps_pdt_pubkey,false);
       ECDH.generateKeys();  // erase for safty
       
       tmpPub = (r_plt[0]?'03':'02') + r_plt[1].toString('hex');
       gncd_fetch_keys.push([tmpPub,r_plt[2],r_pdt[2]]);
-      if (gncd_fetch_keys.length > 3)  // max hold 3 items
+      if (gncd_fetch_keys.length > 5)  // max hold 5 items
         gncd_fetch_keys.splice(0,gncd_fetch_keys.length - 3);
       
       cipherBuf = encryptMsg(r_plt[2],cipherBuf);
       cipherBuf = encryptMsg(r_pdt[2],cipherBuf);
       
-      info = [now_tm,child1,child2,child3,targAcc.publicKey,rootcode,tmpPub+cipherBuf.toString()];
+      info = [now_tm,expireMins,child1,child2,child3,targAcc.publicKey,rootcode,tmpPub+cipherBuf.toString()];
       
       if (realHost) {  // need report to RSP
         let reportPath = Buffer.alloc(12,0);
@@ -1163,12 +1166,15 @@ function BipAccount() {
       else callback(info);
     },
     
-    decryptGreencard(pubkey, content) {  // content should be base64 string
+    decryptGreencard(pubkey, content, padding) {  // content should be base64 string
       for (let i=0,item; item=gncd_fetch_keys[i]; i++) {
         if (item[0] === pubkey) {
           let cardMsg = decryptMsg(item[2],content); // by pdt key
           cardMsg = decryptMsg(item[1],cardMsg.toString(CryptoJS.enc.Base64)); // by plt key
-          return cardMsg.toString(CryptoJS.enc.Hex);
+          cardMsg = cardMsg.toString(CryptoJS.enc.Hex);
+          if (padding)
+            return cardMsg.slice(0,0-padding-padding);
+          else return cardMsg;
         }
       }
       return '';
@@ -1381,36 +1387,47 @@ self.addEventListener('message', async event => {
         let db = await wallet_db;
         let cfg = await db.get('config',host); // cfg:{name,sw_magic,magic_tm,strategy,storage}+{...other_cfg}
         if (cfg && cfg.sw_magic === magic) {
+          let fromNAL = host === NAL_WEBHOST;
+          let targHost = msg.param[4];
+          if (!fromNAL) {     // when not call from NAL
+            targHost = host;  // only query website itself
+            psptAlso = false; // exclude passport
+            tillTm = null;    // fixed by default
+          }
+          else {
+            if (!targHost) targHost = host;
+          }
+          
           let now = Math.floor((new Date()).valueOf() / 1000);
           if (typeof tillTm != 'number') {
             let sessType = cfg.strategy?.session_type;
-            if (typeof sessType != 'number') sessType = 2;
+            if (typeof sessType != 'number') sessType = 1;
             let period = session_periods[sessType & 0x07];
-            tillTm = now + period;
+            tillTm = now + period;  // still alive (not expired) after one period
           }
-          
-          let metaExpired = tillTm, defaultExp = (host===NAL_WEBHOST?336:12); // 14 days or 12 hours
+          let metaExpired = tillTm;
           if (psptAlso)
-            metaExpired = now + (cfg.strategy?.meta_pspt_expired || defaultExp) * 3600;
-          metaExpired = 0 - Math.min(tillTm,metaExpired)
+            metaExpired = now + (cfg.strategy?.meta_pspt_expired || 336) * 3600; // 336h is 14 days
+          metaExpired = 0 - Math.min(tillTm,metaExpired);  // meta passport reused only within 12 hours by default, it can be changed by strategy.meta_pspt_expired
           
-          let targHost = msg.param[4];
-          if (!targHost) targHost = host;
           let range = IDBKeyRange.upperBound([targHost,0-tillTm]);
-          let items = await db.getAllFromIndex('recent_cards','host_expired',range,16);
+          let items = await db.getAllFromIndex('recent_cards','host_expired',range,36); // max scan 36 cards
           
           ret = [];
-          items.forEach( item => {  // it sorted by 'expired' field
-            if (item.flag == 'pspt') {
-              if (!psptAlso) return;
-              
-              if (parseInt(item.child) >= 0x80000000) {  // is meta passport
-                if (item.expired > metaExpired)
-                  ret.push(item);
+          items.forEach( item => { // it sorted by 'expired' field
+            if (!fromNAL) { // when not call from NAL, only includes visa card
+              if (item.flag == 'visa') ret.push(item);
+            }
+            else {
+              if (item.flag == 'pspt') {
+                if (!psptAlso) return;
+                if (parseInt(item.child) >= 0x80000000) {  // is meta passport  // item.child can be 'child1,child2,child3'
+                  if (item.expired > metaExpired) ret.push(item); // not expired
+                }
+                else ret.push(item);
               }
               else ret.push(item);
             }
-            else ret.push(item);
           });
         }
       }
@@ -1457,7 +1474,7 @@ self.addEventListener('message', async event => {
       }
       if (cfg) {
         let sessType = msg.param[3];
-        if (typeof sessType != 'number') sessType = 2;
+        if (typeof sessType != 'number') sessType = 1;
         
         let period = session_periods[sessType & 0x07];
         let now = Math.floor((new Date()).valueOf() / 1000);
@@ -1498,7 +1515,7 @@ self.addEventListener('message', async event => {
               pubkey:info[5].toString('hex') };
             let option = {method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'};
             
-            let realUrl = 'https://' + (accInfo.real_sp || 'real.fn-share.com') + '/cards/pspt/' + info[6];
+            let realUrl = 'https://' + (accInfo.real_sp || DEFAULT_REAL_SERVER) + '/cards/pspt/' + info[6];
             ret = await wait__(fetch(realUrl,option),30000).then( res => {
               if (res.status == 200)
                 return res.json();
@@ -1520,7 +1537,7 @@ self.addEventListener('message', async event => {
                   let expired = info2[1] * 60;
                   let save_tm = Math.floor((new Date()).valueOf() / 1000);
                   let card2 = { host, flag:'pspt', role:'', child:child2+'',
-                    pubkey, referrer:'', content:passport, save_tm, expired:0-expired };
+                    pubkey, content:passport, save_tm, expired:0-expired };
                   db.put('recent_cards',card2); // no waiting
                   
                   return { is_meta, state:'NEW_PSPT', content:passport, realm:host,
@@ -1529,6 +1546,121 @@ self.addEventListener('message', async event => {
               }
             });  // end of await fetch
           }
+        }
+      }
+      
+      event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+    }
+    
+    else if (msg.cmd == 'get_gncd') {
+      let ret = 'NONE', cfg = null;
+      let host = msg.param[0], magic = msg.param[1], role = msg.param[2];
+      let child = msg.param[3], adminPub = msg.param[4];
+      if (child) child = parseInt(child);  // ensure be number
+      let db = await wallet_db;
+      
+      if (!rootBip.hasInit())
+        ret = 'WAIT_PASS';
+      else if ( typeof host == 'string' && host && typeof role == 'string' &&
+        typeof child == 'number' && typeof adminPub == 'string' && adminPub) {
+        cfg = await db.get('config',host);
+        if (cfg && cfg.sw_magic !== magic) cfg = null;
+      }
+      
+      if (cfg) {
+        let expireMins = msg.param[5] || 20160;  // default 14 days
+        let reuseMins = msg.param[6];
+        
+        adminPub = Buffer.from(adminPub,'hex');
+        
+        let card = null, accInfo = null, cryptoHost = null;
+        if (adminPub.length == 33 && typeof expireMins == 'number') {
+          card = await db.get('recent_cards',[host,'visa',role,child+'']);
+          if (card) {
+            accInfo = await db.get('config','account');
+            cryptoHost = accInfo?.crypto_host;
+          }
+        }
+        
+        if (!card)
+          ret = 'NO_CARD';
+        else if (!cryptoHost)
+          ret = 'NETWORK_ERROR';
+        else {
+          if (typeof reuseMins != 'number') {
+            let sessType = cfg.strategy?.session_type;
+            let sessLimit = cfg.strategy?.session_limit;
+            if (typeof sessType == 'number' && typeof sessLimit == 'number')
+              reuseMins = Math.floor(refresh_periods[sessType&0x07] * sessLimit / 60);
+            else reuseMins = 2880; // 2880 minutes is 2 days, 0 for no reuse
+          }
+          
+          let suggestPre = child + ',';
+          let suggestChild = null;  // default null means generating new one
+          if (reuseMins) {
+            let now = Math.floor((new Date()).valueOf() / 1000);
+            let range = IDBKeyRange.upperBound([host,0-now+reuseMins*60]);
+            let items = await db.getAllFromIndex('recent_cards','host_expired',range,36);
+            
+            for (let i=0; i < items.length; i++) {
+              let item = items[i];
+              if (item.flag == 'gncd' && item.child.indexOf(suggestPre) == 0) {
+                if (item.role === role) { // same role, meet best one
+                  suggestChild = item.child.slice(suggestPre.length);
+                  break;
+                }
+                else {
+                  if (!suggestChild)  // try first matched
+                    suggestChild = item.child.slice(suggestPre.length);
+                }
+              }
+            }
+          }
+          
+          let realHost = accInfo.real_sp || DEFAULT_REAL_SERVER; // not null, will report to RSP
+          rootBip.genGreencardCipher(adminPub,expireMins,card,suggestChild,realHost, info => {
+            ret = 'NETWORK_ERROR';
+            if (info) { // [now_tm,expireMins,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
+              let cipher = info[7];  // cipher is hex string
+              let url = 'https://' + cryptoHost + '/cards/greencard';
+              wait__(fetch(url,{method:'POST',body:JSON.stringify({cipher:cipher})}),30000).then( res2 => {
+                if (res2.status == 200)
+                  return res2.json();
+                else {
+                  if (res2.status == 400)
+                    return res2.text();
+                  else return 'REQUEST_FAIL';
+                }
+              }, e => 'NETWORK_ERROR').then( data => {
+                if (data && data.card) { // data.card is base64 string
+                  let tmpPubkey = Buffer.from(cipher.slice(0,66),'hex');
+                  let hexCard = rootBip.decryptGreencard(tmpPubkey,data.card,data.padding);
+                  if (hexCard && hexCard.slice(0,8) != '676e6364') // not 'gncd'
+                    hexCard = '';
+                  
+                  if (hexCard) {
+                    let save_tm = Math.floor((new Date()).valueOf() / 1000);
+                    let expired = 0 - info[1] * 60;
+                    let cardRec = { host,role,save_tm,expired, flag:'gncd',
+                      child: info[2] + ',' + info[3] + ',' + info[4],
+                      pubkey: info[5].toString('hex'), content: hexCard }
+                    await db.put('recent_cards',cardRec);
+                    
+                    ret = {expired:info[1],child:info[2]+'',targ_pubkey:info[5].toString('hex'),card:hexCard};
+                  }
+                  else ret = 'UNKNOWN_CARD';
+                }
+                else if (typeof data == 'string')
+                  ret = 'NETWORK_ERROR:' + data;
+                // else, ret = 'NETWORK_ERROR';
+                
+                event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+              });
+            }
+            else event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+          });
+          
+          return;  // replied in previous callback
         }
       }
       
@@ -1559,7 +1691,7 @@ self.addEventListener('message', async event => {
       let ret = 'NONE', cfg = null;
       let host = msg.param[0], magic = msg.param[1], flag = msg.param[2];
       let role = msg.param[3], child = msg.param[4], content = msg.param[5];
-      let referrer = msg.param[6] || '', comefrom = msg.param[7] || '';
+      let comefrom = msg.param[6] || '';
       
       if ( typeof host == 'string' && host && typeof role == 'string' && typeof child == 'string' &&
            (flag === 'pspt' || flag === 'visa' || flag === 'gncd') &&
@@ -1569,7 +1701,7 @@ self.addEventListener('message', async event => {
       }
       
       if (host == NAL_WEBHOST) {
-        let targHost = msg.param[8];
+        let targHost = msg.param[7];
         if (typeof targHost == 'string' && targHost) host = targHost;
       }
       
@@ -1586,7 +1718,7 @@ self.addEventListener('message', async event => {
           let pubkey = info[0];
           let expired = info[1] * 60;
           let save_tm = Math.floor((new Date()).valueOf() / 1000);
-          let card = {host,flag,role,child,pubkey,referrer,content,save_tm,expired:0-expired};
+          let card = {host,flag,role,child,pubkey,content,save_tm,expired:0-expired};
           if (typeof comefrom == 'string' && comefrom) card.comefrom = comefrom;
           
           await (await wallet_db).put('recent_cards',card);
@@ -1594,96 +1726,6 @@ self.addEventListener('message', async event => {
         }
       }
       
-      event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
-    }
-    
-    else if (msg.cmd == 'gncd_cipher') {
-      let ret = 'NONE', cfg = null;
-      let host = msg.param[0], magic = msg.param[1], role = msg.param[2];
-      let child = msg.param[3], adminPub = msg.param[4];
-      if (child) child = parseInt(child);  // ensure be number
-      let db = await wallet_db;
-      
-      if (!rootBip.hasInit())
-        ret = 'WAIT_PASS';
-      else if ( typeof host == 'string' && host && typeof role == 'string' &&
-        typeof child == 'number' && typeof adminPub == 'string' && adminPub) {
-        cfg = await db.get('config',host);
-        if (cfg && cfg.sw_magic !== magic) cfg = null;
-      }
-      
-      if (cfg) {
-        let expireMins = msg.param[5] || 20160;  // default 14 days
-        let reuseMins = msg.param[6];
-        
-        adminPub = Buffer.from(adminPub,'hex');
-        
-        if (adminPub.length == 33 && typeof expireMins == 'number') {
-          let card = await db.get('recent_cards',[host,'visa',role,child+'']);
-          if (card) {
-            if (typeof reuseMins != 'number') {
-              let sessType = cfg.strategy?.session_type;
-              let sessLimit = cfg.strategy?.session_limit;
-              if (typeof sessType == 'number' && typeof sessLimit == 'number')
-                reuseMins = Math.floor(refresh_periods[sessType&0x07] * sessLimit / 60);
-              else reuseMins = 2880; // 2880 minutes is 2 days, 0 for no reuse
-            }
-            
-            let suggestPre = child + ',';
-            let suggestChild = null;  // default null means generating new one
-            if (reuseMins) {
-              let now = Math.floor((new Date()).valueOf() / 1000);
-              let range = IDBKeyRange.upperBound([host,0-now+reuseMins*60]);
-              let items = await db.getAllFromIndex('recent_cards','host_expired',range,16);
-              
-              for (let i=0; i < items.length; i++) {
-                let item = items[i];
-                if (item.flag == 'gncd' && item.child.indexOf(suggestPre) == 0) {
-                  if (item.role === role) { // same role, meet best one
-                    suggestChild = item.child.slice(suggestPre.length);
-                    break;
-                  }
-                  else {
-                    if (!suggestChild)  // try first matched
-                      suggestChild = item.child.slice(suggestPre.length);
-                  }
-                }
-              }
-            }
-            
-            let accInfo = await db.get('config','account');
-            let realHost = accInfo.real_sp || DEFAULT_REAL_SERVER; // not null, will report to RSP
-            rootBip.genGreencardCipher(adminPub,expireMins,card,
-              suggestChild,realHost, info => {
-              if (info) { // [now_tm,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
-                ret = {child1:info[1],child2:info[2],child3:info[3],pubkey:info[4].toString('hex'),cipher:info[6]};
-              }
-              else ret = 'NETWORK_ERROR';
-              event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
-            });
-            return;  // would reply in previous callback
-          }
-          else ret = 'NO_CARD';
-        }
-      }
-      
-      event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
-    }
-    
-    else if (msg.cmd == 'gncd_decrypt') {
-      let ret = 'NONE', cfg = null;
-      let host = msg.param[0], magic = msg.param[1];
-      if (typeof host == 'string' && host) {
-        cfg = await (await wallet_db).get('config',host);
-        if (cfg && cfg.sw_magic !== magic) cfg = null;
-      }
-      if (cfg) {
-        let pubkey = msg.param[2], content = msg.param[3];
-        if (pubkey && content) {  // content is base64 string
-          let info = rootBip.decryptGreencard(pubkey,content);
-          if (info) ret = {card:info};
-        }
-      }
       event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
     }
     
@@ -1695,7 +1737,17 @@ self.addEventListener('message', async event => {
         if (cfg && cfg.sw_magic !== magic) cfg = null;
       }
       if (cfg) {
-        ret = { role:cfg.login_role, child:cfg.login_child, pubkey:cfg.login_pubkey,
+        let bb = cfg.login_child.split(','); // can be 'child1,child2,child3'
+        let flag = bb.length >= 3? 'gncd': 'pspt';
+        let child = parseInt(bb[0]);
+        if (child >= 0x80000000) {
+          flag = 'meta';
+          child = child - 0x80000000;
+        }
+        else if (flag == 'gncd')
+          child = 0;  // avoid showing child1,child2,child3
+        
+        ret = { flag, child, role:cfg.login_role, pubkey:cfg.login_pubkey,
           time:cfg.login_time, expired:cfg.login_expired };
       }
       event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
@@ -1854,7 +1906,14 @@ self.addEventListener('message', async event => {
       rootBip.config(secret,accInfo,fp);
       let bipInfo = rootBip.info();
       accInfo.psw_pubkey_head = bipInfo.psw_pubkey.slice(0,4);
+      
+      accInfo.real_manager = { type:'',
+        'rsp_admin_pubkey':'028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
+        'cps_plt_pubkey':'03d72fa51f87d007a9c98e858bb057cb4e280ee1c8d97516af96ec1c9e13d63c36',
+        'cps_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
+      };
       await db.put('config',accInfo);
+      REAL_MANAGER = setupRealManagers(accInfo);
       
       ver_info.acc_type = 'restorable';
       await db.put('config',ver_info);
@@ -2090,24 +2149,38 @@ self.addEventListener('message', async event => {
         return;
       }
       
-      else if (msg.cmd == 'set_real_server' || msg.cmd == 'set_crypto_host_url') {
-        let ret = 'NONE', newValue = msg.param[2];
-        if (cfg && typeof newValue == 'string') {
-          newValue = newValue.trim();
-          if (newValue.indexOf('https://') == 0) newValue = newValue.slice(8).trim();
+      else if (msg.cmd == 'set_real_managers') {
+        let ret = 'NONE', url = msg.param[2], info = msg.param[3];
+        if (cfg && url && typeof url == 'string' && info) {
+          if (url.indexOf('https://') == 0) url = url.slice(8).trim();
+          url = url || DEFAULT_REAL_SERVER;
           
           let accInfo = await db.get('config','account');
           if (accInfo) {
-            if (msg.cmd == 'set_real_server') {
-              newValue = newValue || DEFAULT_REAL_SERVER;
-              accInfo.real_sp = newValue;
-            }
-            else {
-              newValue = newValue || DEFAULT_CRYPTO_HOST;
-              accInfo.crypto_host_url = newValue;
-            }
+            let tmp = setupRealManagers(info);
+            
+            accInfo.real_sp = url;
+            accInfo.real_managers = tmp;
             await db.put('config',accInfo);
-            ret = {url:newValue};
+            REAL_MANAGER = tmp;
+            ret = 'OK';
+          }
+        }
+        event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+        return;
+      }
+      
+      else if (msg.cmd == 'set_crypto_host_url') {
+        let ret = 'NONE', url = msg.param[2];
+        if (cfg && typeof url == 'string') {
+          if (url.indexOf('https://') == 0) url = url.slice(8).trim();
+          
+          let accInfo = await db.get('config','account');
+          if (accInfo) {
+            url = url || DEFAULT_CRYPTO_HOST;
+            accInfo.crypto_host_url = url;
+            await db.put('config',accInfo);
+            ret = {url};
           }
           else ret = 'NOT_READY';
         }
@@ -2185,24 +2258,6 @@ self.addEventListener('message', async event => {
           ret = bipInfo;
         }
         
-        event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
-      }
-      
-      else if (msg.cmd == 'set_real_admin') {
-        let ret = 'NONE', pubkey = msg.param[2];
-        if (cfg && typeof pubkey == 'string' && pubkey.length == 66) {
-          let pubkey2 = Buffer.from(pubkey,'hex');
-          if (pubkey2[0] == 2 || pubkey2[0] == 3) {
-            let accInfo = await db.get('config','account');
-            if (accInfo) {
-              accInfo.real_admin_pubkey = pubkey;
-              await db.put('config',accInfo);
-            }
-            REALNAME_PUBKEY = pubkey2;
-            REALNAME_FIGERPRINT = ripemdHash(pubkey2).slice(0,4);
-            ret = 'OK';
-          }
-        }
         event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
       }
       

@@ -1313,24 +1313,19 @@ $( () => {
     let url = $('#input-realhost').val().trim();
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
-    wait__(fetch('https://' + url + '/rsp_admin_pubkey'),30000).then(res => {
+    wait__(fetch('https://' + url + '/cards/managers'),30000).then(res => {
       if (res.status == 200)
-        return res.text();
+        return res.json();
       else return null;
     }, e => null).then( data => {
-      if (data && typeof data == 'string' && data.length == 66) {
-        NAL.call_('set_real_admin',[NAL.swHost(),NAL.swMagic(),data]).then( res2 => {
+      if (data && data.rsp_admin_pubkey) {
+        NAL.call_('set_real_managers',[NAL.swHost(),NAL.swMagic(),url,data]).then( res2 => {
           if (res2 === 'OK') {
-            NAL.call_('set_real_server',[NAL.swHost(),NAL.swMagic(),url]).then( res3 => {
-              if (res3 && res3.url)
-                alert('更改成功');
-              else alert('操作失败');
-            });
-          }
-          else alert('保存服务点管理员公钥失败');
+            alert('更改成功');
+          else alert('操作失败');
         });
       }
-      else alert('查询真身服务点管理员公钥失败，请检查网络');
+      else alert('查询真身服务点管理员账号失败，请检查网络');
     });
   });
   
@@ -1764,11 +1759,13 @@ function updateSignListPage(newPageIdx) {
     if (++counter > 10) break;
     
     let desc, id = cfg[0], child = cfg[1], tm = cfg[2], realm = cfg[3];
-    if (child < 0)
-      desc = '隐身份: ' + Math.abs(child);
-    else if (child >= 0x80000000)
-      desc = '元身份: ' + (child & 0x7fffffff);
-    else desc = '泛身份: ' + child;
+    let bb = child.split(',');
+    let child1 = parseInt(bb[0]);
+    if (bb.length >= 3)
+      desc = '隐身份: ' + child1;
+    else if (child1 >= 0x80000000)
+      desc = '元身份: ' + (child1 & 0x7fffffff);
+    else desc = '泛身份: ' + child1;
     tm = (new Date(tm * 1000)).toLocaleString();
     
     sHtml += '<a class="list-group-item list-group-item-action" data-name="' + id + '" data-bs-toggle="list" role="tab"><div class="d-flex w-100 justify-content-between">';
@@ -1842,7 +1839,7 @@ $( () => {
       
       let sHtml = '';
       res.forEach( (card,idx) => {
-        let cardDesc, cardChild = Math.abs(card.child);
+        let cardDesc, cardChild = parseInt(card.child);
         if (card.flag == 'pspt') {
           if (cardChild >= 0x80000000) {
             cardDesc = '元护照';
@@ -1913,7 +1910,7 @@ $( () => {
     let cardHost = cardNode.data('host');
     let cardFlag = cardNode.data('flag');
     let cardRole = cardNode.data('role');
-    let cardChild = parseInt(cardNode.data('child'));
+    let cardChild = cardNode.data('child');
     let cardContent = cardNode.data('content');
     
     if (!cardChild || !cardContent) return; // unexpected error
@@ -1931,8 +1928,11 @@ $( () => {
       });
     }
     else { // isCopy
-      let prefix = Buffer.alloc(4,0);
-      prefix.writeUInt32BE(cardChild);
+      let bb = cardChild.split(',');   // child1,child2,child3
+      let prefix = Buffer.alloc(12,0);
+      prefix.writeUInt32BE(parseInt(bb[0]),0);
+      prefix.writeUInt32BE(bb.length >= 2?parseInt(bb[1]):0,4);
+      prefix.writeUInt32BE(bb.length >= 3?parseInt(bb[2]):0,8);
       
       let buf = Buffer.concat([prefix,Buffer.from(cardContent,'hex')]);
       let crc = CreateHash('sha256').update(buf).digest().slice(0,4);
@@ -1961,10 +1961,10 @@ $( () => {
     let cardContent = $('#addcard-content').val().trim().toLowerCase();
     if (!cardContent) return alert('请输入或粘贴卡证内容');
     
-    let child, flag, role, succ = true;
+    let child,child2,child3, flag, role, succ = true;
     try {
       let buf = Buffer.from(cardContent,'hex');
-      flag = buf.slice(4,8).toString('utf-8');
+      flag = buf.slice(12,16).toString('utf-8');
       if (flag != 'pspt' && flag != 'visa' && flag != 'gncd')
         succ = false;
       else {
@@ -1972,12 +1972,14 @@ $( () => {
         if (crc != buf.slice(-4).toString('hex'))
           return alert('卡证校验不通过');
         
-        child = buf.readUInt32BE(0);  
-        buf = buf.slice(4,-4);
+        child = buf.readUInt32BE(0);
+        child2 = buf.readUInt32BE(4);
+        child3 = buf.readUInt32BE(8);
+        buf = buf.slice(12,-4);
         
         let realm = scanCardTag(buf,0xc8)  // 0xc8 is TAG_REALM
         if (!realm)
-          succ = false;
+          succ = false;  // realm is required
         else {
           role = realm.toString('utf-8').split('+')[1] || '';
           cardContent = buf.toString('hex');
@@ -1990,7 +1992,9 @@ $( () => {
     if (!succ) return alert('卡证格式不正确');
     
     let comefrom = $('#addcard-auth').val().trim();
-    NAL.call_('save_card',[NAL.swHost(),NAL.swMagic(),flag,role,child,cardContent,'',comefrom,targHost]).then( res => {
+    let children = child + '';
+    if (flag == 'gncd') children += ',' + child2 + ',' + child3;
+    NAL.call_('save_card',[NAL.swHost(),NAL.swMagic(),flag,role,children,cardContent,comefrom,targHost]).then( res => {
       let cardDesc = flag == 'pspt'? '护照': (flag == 'visa'? '签证': '绿卡');
       if (res === 'OK') {
         $('#addcard-auth').val('');
