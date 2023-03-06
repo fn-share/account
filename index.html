@@ -1320,7 +1320,7 @@ $( () => {
     }, e => null).then( data => {
       if (data && data.rsp_admin_pubkey) {
         NAL.call_('set_real_managers',[NAL.swHost(),NAL.swMagic(),url,data]).then( res2 => {
-          if (res2 === 'OK') {
+          if (res2 === 'OK')
             alert('更改成功');
           else alert('操作失败');
         });
