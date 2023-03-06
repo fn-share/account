@@ -346,8 +346,8 @@ function setupRealManagers(info) {
 
 setTimeout( async () => {
   let accInfo = await (await wallet_db).get('config','account');
-  if (accInfo?.real_admin_pubkey)
-    REAL_MANAGER = setupRealManagers(accInfo);
+  if (accInfo?.real_manager)
+    REAL_MANAGER = setupRealManagers(accInfo.real_manager);
   
   if (location.hostname != 'localhost') {  // no VDF when debugging at localhost
     const createVdf = require('@subspace/vdf').default;
@@ -1914,7 +1914,7 @@ self.addEventListener('message', async event => {
         'cps_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
       };
       await db.put('config',accInfo);
-      REAL_MANAGER = setupRealManagers(accInfo);
+      REAL_MANAGER = setupRealManagers(accInfo.real_manager);
       
       ver_info.acc_type = 'restorable';
       await db.put('config',ver_info);
@@ -2161,7 +2161,7 @@ self.addEventListener('message', async event => {
             let tmp = setupRealManagers(info);
             
             accInfo.real_sp = url;
-            accInfo.real_managers = tmp;
+            accInfo.real_managers = info;
             await db.put('config',accInfo);
             REAL_MANAGER = tmp;
             ret = 'OK';
