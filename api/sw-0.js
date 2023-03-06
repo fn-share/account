@@ -1053,7 +1053,7 @@ function BipAccount() {
       
       // step 3: setup passport
       if (!realm) realm = '';
-      let ret = this._newPassport(isAcc20,realm,tmSegment,child,didAcc,now_tm,expiredTm,REALNAME_FIGERPRINT);
+      let ret = this._newPassport(isAcc20,realm,tmSegment,child,didAcc,now_tm,expiredTm,REAL_MANAGER.rsp_admin_fp);
       if (tmSegment == 0) ret.push(did_realid);
       return ret;
     },
