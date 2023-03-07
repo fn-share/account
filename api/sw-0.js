@@ -1101,7 +1101,7 @@ function BipAccount() {
       let now_tm = Math.floor((new Date()).valueOf() / 60000);  // by minutes
       
       let bufCard = Buffer.from(visaCard.content,'hex');
-      let cipherSize = 88 + bufCard.length;
+      let cipherSize = 55 + bufCard.length;
       let padding = cipherSize % 16;
       if (padding) padding = (16 - padding);
       
@@ -1117,14 +1117,13 @@ function BipAccount() {
       }
       
       let off = 0, cipherBuf = Buffer.alloc(cipherSize+padding,0);
-      ownerAcc.publicKey.copy(cipherBuf,off); off += 33; // copy(targBuffer,targStart,sourStart,sourEnd)
-      adminPub.copy(cipherBuf,off); off += 33;
+      adminPub.copy(cipherBuf,off); off += 33;  // buf.copy(targBuffer,targStart,sourStart,sourEnd)
       rootcode.copy(cipherBuf,off); off += 4;
       cipherBuf.writeUInt32BE(child2,off); off += 4;
       cipherBuf.writeUInt32BE(child3,off); off += 4;
       cipherBuf.writeUInt32BE(now_tm,off); off += 4;
       cipherBuf.writeUInt32BE(expireMins,off); off += 4;
-      cipherBuf.writeUInt16BE(bufCard.length,off); off += 2;  // off = 88
+      cipherBuf.writeUInt16BE(bufCard.length,off); off += 2;  // off = 55
       bufCard.copy(cipherBuf,off); off += bufCard.length;
       if (padding) generateRand(padding).copy(cipherBuf,off);
       
@@ -1591,14 +1590,16 @@ self.addEventListener('message', async event => {
             let sessType = cfg.strategy?.session_type;
             let sessLimit = cfg.strategy?.session_limit;
             if (typeof sessType == 'number' && typeof sessLimit == 'number')
-              reuseMins = Math.floor(refresh_periods[sessType&0x07] * sessLimit / 60);
-            else reuseMins = 2880; // 2880 minutes is 2 days, 0 for no reuse
+              reuseMins = Math.floor(refresh_periods[sessType&0x07] * sessLimit / 60) * 4;
+            else reuseMins = 2880;  // 2880 minutes is 2 days, 0 for no reuse
           }
+          
+          let now = Math.floor((new Date()).valueOf() / 1000);
+          expireMins = Math.floor(now / 60) + expireMins;  // convert to till time
           
           let suggestPre = child + ',';
           let suggestChild = null;  // default null means generating new one
           if (reuseMins) {
-            let now = Math.floor((new Date()).valueOf() / 1000);
             let range = IDBKeyRange.upperBound([host,0-now+reuseMins*60]);
             let items = await db.getAllFromIndex('recent_cards','host_expired',range,36);
             
