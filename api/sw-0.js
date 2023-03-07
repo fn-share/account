@@ -1117,7 +1117,7 @@ function BipAccount() {
       }
       
       let off = 0, cipherBuf = Buffer.alloc(cipherSize+padding,0);
-      targAcc.publicKey.copy(cipherBuf,off); off += 33; // copy(targBuffer,targStart,sourStart,sourEnd)
+      ownerAcc.publicKey.copy(cipherBuf,off); off += 33; // copy(targBuffer,targStart,sourStart,sourEnd)
       adminPub.copy(cipherBuf,off); off += 33;
       rootcode.copy(cipherBuf,off); off += 4;
       cipherBuf.writeUInt32BE(child2,off); off += 4;
