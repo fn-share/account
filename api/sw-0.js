@@ -966,6 +966,7 @@ function BipAccount() {
       if (b.length == 3) {
         let child2 = parseInt(b[1]) & 0x7fffffff;
         let child3 = parseInt(b[2]) & 0x7fffffff;
+        didAcc.chainCode = EMPTY_STRING;
         didAcc = didAcc.derive(child2).derive(child3);
       }
       
@@ -1238,7 +1239,7 @@ self.addEventListener('message', async event => {
               ret = 'NOT_LOGIN';
             else if (isLoginCmd) {
               child = child + '';
-              await (await wallet_db).put('wait_sign',{child:child+'',host,realm,content,request_tm,sign_tm});
+              await (await wallet_db).put('wait_sign',{child:child,host,realm,content,request_tm,sign_tm});
               ret = 'ADDED';
             }
             else {
@@ -1589,9 +1590,11 @@ self.addEventListener('message', async event => {
           if (typeof reuseMins != 'number') {
             let sessType = cfg.strategy?.session_type;
             let sessLimit = cfg.strategy?.session_limit;
-            if (typeof sessType == 'number' && typeof sessLimit == 'number')
+            if (typeof sessType == 'number' && typeof sessLimit == 'number') {
               reuseMins = Math.floor(refresh_periods[sessType&0x07] * sessLimit / 60);
-            else reuseMins = 2880;  // 2880 minutes is 2 days, 0 for no reuse
+              if (reuseMins > 20160) reuseMins = 20160;  // 20160 is 14 days, max reuse expiring-14-days card
+            }
+            else reuseMins = 2880;  // 0 for no reuse, 2880 minutes is 2 days, can reuse expiring-2-days card 
           }
           
           let now = Math.floor((new Date()).valueOf() / 1000);
@@ -1612,7 +1615,7 @@ self.addEventListener('message', async event => {
                   suggestChild = item.child.slice(suggestPre.length);
                   suggestExp = Math.abs(item.expired);
                   if (suggestExp > now + 7200) // at least expire after 2 hours
-                    suggestCard = item; // reuse it, card maybe expired,
+                    suggestCard = item; // reuse it, card maybe just recent expired, it must already report to RSP
                   break;
                 }
                 else {
