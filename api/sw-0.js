@@ -353,7 +353,7 @@ setTimeout( async () => {
     const createVdf = require('@subspace/vdf').default;
     vdfInstance = await createVdf();
   }
-}, 2000);
+}, 5000);
 
 function enhanceFixKey(fixKey) {
   if (vdfInstance === null) return fixKey;
@@ -1235,6 +1235,7 @@ self.addEventListener('message', async event => {
         let cfg = await (await wallet_db).get('config',host);
         if (cfg?.sw_magic === magic) {
           let realm = msg.param[3] || '';
+          let db = await wallet_db;
           
           if (realm) { // request signature, regist to 'wait_sign' table first
             let child = msg.param[4];
@@ -1242,8 +1243,6 @@ self.addEventListener('message', async event => {
             let rsvd = msg.param[6] || '';
             let request_tm = 0 - tm;  // -N for easy filter
             let sign_tm = 0;
-            
-            let db = await wallet_db;
             
             let targSegm = realm.split('+');
             let isLoginCmd = targSegm.length == 2 && targSegm[1] == 'login';
