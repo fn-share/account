@@ -1124,7 +1124,7 @@ function BipAccount() {
       cipherBuf.writeUInt32BE(child3,off); off += 4;
       cipherBuf.writeUInt32BE(now_tm,off); off += 4;
       cipherBuf.writeUInt32BE(expireMins,off); off += 4;
-      cipherBuf.writeUInt16BE(bufCard.length); off += 2;  // off = 88
+      cipherBuf.writeUInt16BE(bufCard.length,off); off += 2;  // off = 88
       bufCard.copy(cipherBuf,off); off += bufCard.length;
       if (padding) generateRand(padding).copy(cipherBuf,off);
       
