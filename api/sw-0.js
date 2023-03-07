@@ -1107,12 +1107,12 @@ function BipAccount() {
       
       let authExpired = scanCardTag(bufCard,0xcb);  // TAG_CERT_EXPIRED, by minutes
       if (authExpired) {
-        authExpired = bufCard.ReadUInt32BE(authExpired+2);
+        authExpired = bufCard.readUInt32BE(authExpired+2);
         if (expireMins > authExpired) expireMins = authExpired;
       }
       let maxAuth = scanCardTag(bufCard,0xcf);  // TAG_MAX_AUTH_TIME, by minutes
       if (maxAuth) {
-        maxAuth = now_tm + bufCard.ReadUInt32BE(maxAuth+2);
+        maxAuth = now_tm + bufCard.readUInt32BE(maxAuth+2);
         if (expireMins > maxAuth) expireMins = maxAuth;
       }
       
