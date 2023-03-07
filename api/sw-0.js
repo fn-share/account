@@ -353,7 +353,7 @@ setTimeout( async () => {
     const createVdf = require('@subspace/vdf').default;
     vdfInstance = await createVdf();
   }
-}, 5000);
+}, 3000);
 
 function enhanceFixKey(fixKey) {
   if (vdfInstance === null) return fixKey;
@@ -841,7 +841,7 @@ function BipAccount() {
   // we hide some variables here, avoid leaking out by console.log()
   let phone = null, figerprint = null;
   let alternate_no = null, alternate_off = 0;
-  let didRoot = null, undisRoot = null, pswRoot = null, secureRoot = null, realRoot = null;
+  let didRoot = null, pswRoot = null, secureRoot = null, realRoot = null;
   let did_realid = null;
   let selfsign_no = null, selfsign = null;
   let securebox_cipher = '';
@@ -855,7 +855,6 @@ function BipAccount() {
     
     disableBip() {   // no need clear: figerprint
       didRoot = null;    // did
-      undisRoot = null;  // did/alternate, undisclosed account
       secureRoot = null; // did/alternate/0
       realRoot = null;   // did/0/0
       pswRoot = null;    // psw/0'
@@ -874,8 +873,7 @@ function BipAccount() {
       
       didRoot = bip32.fromPrivateKey(secret.slice(0,32),secret.slice(32,64));
       realRoot = didRoot.derive(0).derive(0);
-      undisRoot = didRoot.derive(alternate_no);
-      secureRoot = undisRoot.derive(0);  // "alt/alternate/0" for securebox crypto
+      secureRoot = didRoot.derive(alternate_no).derive(0); // "alt/alternate/0" for securebox crypto
       
       did_realid = b36checkEncode(realRoot.publicKey,'rid1');
       

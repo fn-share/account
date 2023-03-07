@@ -1910,7 +1910,7 @@ $( () => {
     let cardHost = cardNode.data('host');
     let cardFlag = cardNode.data('flag');
     let cardRole = cardNode.data('role');
-    let cardChild = cardNode.data('child');
+    let cardChild = cardNode.data('child')+''; // force as string
     let cardContent = cardNode.data('content');
     
     if (!cardChild || !cardContent) return; // unexpected error
