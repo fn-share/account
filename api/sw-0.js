@@ -1166,9 +1166,9 @@ function BipAccount() {
       else callback(info);
     },
     
-    decryptGreencard(pubkey, content, padding) {  // content should be base64 string
+    decryptGreencard(hexPubkey, content, padding) {  // content should be base64 string
       for (let i=0,item; item=gncd_fetch_keys[i]; i++) {
-        if (item[0] === pubkey) {
+        if (item[0] === hexPubkey) {
           let cardMsg = decryptMsg(item[2],content); // by pdt key
           cardMsg = decryptMsg(item[1],cardMsg.toString(CryptoJS.enc.Base64)); // by plt key
           cardMsg = cardMsg.toString(CryptoJS.enc.Hex);
@@ -1633,8 +1633,7 @@ self.addEventListener('message', async event => {
                 }
               }, e => 'NETWORK_ERROR').then( data => {
                 if (data && data.card) { // data.card is base64 string
-                  let tmpPubkey = Buffer.from(cipher.slice(0,66),'hex');
-                  let hexCard = rootBip.decryptGreencard(tmpPubkey,data.card,data.padding);
+                  let hexCard = rootBip.decryptGreencard(cipher.slice(0,66),data.card,data.padding);
                   if (hexCard && hexCard.slice(0,8) != '676e6364') // not 'gncd'
                     hexCard = '';
                   
