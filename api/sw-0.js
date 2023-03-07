@@ -1184,6 +1184,19 @@ function BipAccount() {
 
 const rootBip = BipAccount();
 
+async function findGreenCard(db, host, pubkey) {
+  let now = Math.floor((new Date()).valueOf() / 1000);
+  let range = IDBKeyRange.upperBound([host,0-now-3600]);
+  let items = await db.getAllFromIndex('recent_cards','host_expired',range,64);
+  
+  for (let i=0; i < items.length; i++) {
+    let item = items[i];
+    if (item.flag == 'gncd' && item.pubkey == pubkey)
+      return item.child;
+  }
+  return null;
+}
+
 self.addEventListener('message', async event => {
   // console.log(`SW receive message: ${event.data}`);
   try {
@@ -1230,16 +1243,22 @@ self.addEventListener('message', async event => {
             let request_tm = 0 - tm;  // -N for easy filter
             let sign_tm = 0;
             
+            let db = await wallet_db;
+            
             let targSegm = realm.split('+');
             let isLoginCmd = targSegm.length == 2 && targSegm[1] == 'login';
             if (!child)  // child=0 is reserved
               child = isLoginCmd? '1': cfg.login_child;
+            else {
+              if (typeof child == 'string' && child.slice(0,5) == 'gncd:')
+                child = await findGreenCard(db,host,child.slice(5));
+            }
             
             if (!child)
               ret = 'NOT_LOGIN';
             else if (isLoginCmd) {
               child = child + '';
-              await (await wallet_db).put('wait_sign',{child:child,host,realm,content,request_tm,sign_tm});
+              await db.put('wait_sign',{child:child,host,realm,content,request_tm,sign_tm});
               ret = 'ADDED';
             }
             else {
@@ -1264,7 +1283,7 @@ self.addEventListener('message', async event => {
                 else if (checker == 'pass')
                   needPass = true;
                 else if (checker == 'rsvd') {
-                  let accInfo = await (await wallet_db).get('config','account');
+                  let accInfo = await db.get('config','account');
                   if (!accInfo || getAccountRsvd(accInfo) !== rsvd) {
                     ret = 'INVALID_RSVD';
                     rootBip.disableBip();
@@ -1281,7 +1300,7 @@ self.addEventListener('message', async event => {
                 
                 if (ret == 'NONE') { // not meet error yet
                   if (needPass) {
-                    await (await wallet_db).put('wait_sign',{child,host,realm,content,request_tm,sign_tm});
+                    await db.put('wait_sign',{child,host,realm,content,request_tm,sign_tm});
                     ret = 'ADDED';
                   }
                   else {
@@ -1302,7 +1321,7 @@ self.addEventListener('message', async event => {
           // else, query signature result from 'sign_history' table
           
           let range = IDBKeyRange.upperBound(0 - tm);
-          let items = await (await wallet_db).getAllFromIndex('sign_history','sign_tm',range,10);
+          let items = await db.getAllFromIndex('sign_history','sign_tm',range,10);
           let info = items.find(item => item.host === host);
           if (info)  // info.signature maybe undefined if is canceled by NAL
             ret = {child:info.child, pubkey:info.pubkey, realm:info.realm, signature:info.signature||''};
@@ -1414,9 +1433,13 @@ self.addEventListener('message', async event => {
           let items = await db.getAllFromIndex('recent_cards','host_expired',range,36); // max scan 36 cards
           
           ret = [];
+          let gncdList = [];
           items.forEach( item => { // it sorted by 'expired' field
             if (!fromNAL) { // when not call from NAL, only includes visa card
-              if (item.flag == 'visa') ret.push(item);
+              if (item.flag == 'visa')
+                ret.push({ flag:'visa', role:item.role, comefrom:item.comefrom||'',
+                  expired:item.expired, child:item.child, pubkey:item.pubkey, content:null });
+              else if (item.flag == 'gncd') gncdList.push(item);
             }
             else {
               if (item.flag == 'pspt') {
@@ -1429,6 +1452,21 @@ self.addEventListener('message', async event => {
               else ret.push(item);
             }
           });
+          
+          if (!fromNAL && gncdList.length) {  // try replace visa with gncd
+            let minExpired = now + 3600;
+            ret.forEach( item => {
+              for (let ii=0,item2; item2=gncdList[ii]; ii++) {
+                if (item2.role == item.role && Math.abs(item2.expired) > minExpired) {
+                  item.child = 'gncd';
+                  item.expired = item2.expired;
+                  item.pubkey = item2.pubkey;
+                  item.content = item2.content;
+                  break;
+                }
+              }
+            });
+          }
         }
       }
       event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
@@ -1614,7 +1652,7 @@ self.addEventListener('message', async event => {
                 if (item.role === role) { // same role, meet best one
                   suggestChild = item.child.slice(suggestPre.length);
                   suggestExp = Math.abs(item.expired);
-                  if (suggestExp > now + 7200) // at least expire after 2 hours
+                  if (suggestExp > now + 3600) // at least expiring after 1 hour
                     suggestCard = item; // reuse it, card maybe just recent expired, it must already report to RSP
                   break;
                 }
@@ -1627,10 +1665,8 @@ self.addEventListener('message', async event => {
           }
           
           if (suggestCard) {  // reuse recent one
-            ret = { expired: Math.floor(suggestExp/60),
-              child:suggestCard.child, targ_pubkey:suggestCard.pubkey,
-              card:suggestCard.content };
-            console.log('reuse:',ret.child);
+            ret = { role, expired: Math.floor(suggestExp/60),
+              targ_pubkey:suggestCard.pubkey, card:suggestCard.content };
             event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
             return;
           }
@@ -1664,8 +1700,7 @@ self.addEventListener('message', async event => {
                       pubkey:info[5].toString('hex'), content:hexCard };
                     db.put('recent_cards',cardRec); // no waiting
                     
-                    ret = { expired:info[1], child:info[2]+','+info[3]+','+info[4],
-                      targ_pubkey, card:hexCard };
+                    ret = { role, expired:info[1], targ_pubkey, card:hexCard };
                   }
                   else ret = 'UNKNOWN_CARD';
                 }
