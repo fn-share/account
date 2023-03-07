@@ -1590,13 +1590,15 @@ self.addEventListener('message', async event => {
             let sessType = cfg.strategy?.session_type;
             let sessLimit = cfg.strategy?.session_limit;
             if (typeof sessType == 'number' && typeof sessLimit == 'number')
-              reuseMins = Math.floor(refresh_periods[sessType&0x07] * sessLimit / 60) * 4;
+              reuseMins = Math.floor(refresh_periods[sessType&0x07] * sessLimit / 60);
             else reuseMins = 2880;  // 2880 minutes is 2 days, 0 for no reuse
           }
           
           let now = Math.floor((new Date()).valueOf() / 1000);
           expireMins = Math.floor(now / 60) + expireMins;  // convert to till time
           
+          let suggestCard = null;
+          let suggestExp = 0;
           let suggestPre = child + ',';
           let suggestChild = null;  // default null means generating new one
           if (reuseMins) {
@@ -1608,6 +1610,9 @@ self.addEventListener('message', async event => {
               if (item.flag == 'gncd' && item.child.indexOf(suggestPre) == 0) {
                 if (item.role === role) { // same role, meet best one
                   suggestChild = item.child.slice(suggestPre.length);
+                  suggestExp = Math.abs(item.expired);
+                  if (suggestExp > now + 7200) // at least expire after 2 hours
+                    suggestCard = item; // reuse it, card maybe expired,
                   break;
                 }
                 else {
@@ -1616,6 +1621,15 @@ self.addEventListener('message', async event => {
                 }
               }
             }
+          }
+          
+          if (suggestCard) {  // reuse recent one
+            ret = { expired: Math.floor(suggestExp/60),
+              child:suggestCard.child, targ_pubkey:suggestCard.pubkey,
+              card:suggestCard.content };
+            console.log('reuse:',ret.child);
+            event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
+            return;
           }
           
           let realHost = accInfo.real_sp || DEFAULT_REAL_SERVER; // not null, will report to RSP
@@ -1647,7 +1661,8 @@ self.addEventListener('message', async event => {
                       pubkey:info[5].toString('hex'), content:hexCard };
                     db.put('recent_cards',cardRec); // no waiting
                     
-                    ret = {expired:info[1],child:info[2]+'',targ_pubkey,card:hexCard};
+                    ret = { expired:info[1], child:info[2]+','+info[3]+','+info[4],
+                      targ_pubkey, card:hexCard };
                   }
                   else ret = 'UNKNOWN_CARD';
                 }
