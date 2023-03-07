@@ -1101,7 +1101,7 @@ function BipAccount() {
       let now_tm = Math.floor((new Date()).valueOf() / 60000);  // by minutes
       
       let bufCard = Buffer.from(visaCard.content,'hex');
-      let cipherSize = 86 + bufCard.length;
+      let cipherSize = 88 + bufCard.length;
       let padding = cipherSize % 16;
       if (padding) padding = (16 - padding);
       
@@ -1124,6 +1124,7 @@ function BipAccount() {
       cipherBuf.writeUInt32BE(child3,off); off += 4;
       cipherBuf.writeUInt32BE(now_tm,off); off += 4;
       cipherBuf.writeUInt32BE(expireMins,off); off += 4;
+      cipherBuf.writeUInt16BE(bufCard.length); off += 2;  // off = 88
       bufCard.copy(cipherBuf,off); off += bufCard.length;
       if (padding) generateRand(padding).copy(cipherBuf,off);
       
