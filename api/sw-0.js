@@ -1100,7 +1100,7 @@ function BipAccount() {
       rootcode = CreateHash('sha256').update(rootcode).digest().slice(0,4);
       let now_tm = Math.floor((new Date()).valueOf() / 60000);  // by minutes
       
-      let bufCard = Buffer.from(card.content,'hex');
+      let bufCard = Buffer.from(visaCard.content,'hex');
       let cipherSize = 86 + bufCard.length;
       let padding = cipherSize % 16;
       if (padding) padding = (16 - padding);
@@ -1152,8 +1152,7 @@ function BipAccount() {
         let body = {rid:did_realid,path:reportPath.toString('hex'),rootcode:rootcode.toString('hex')};
         
         let url = 'https://' + realHost + '/cards/report';
-        wait__( fetch(url,{method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'}),
-        5000).then( res => {
+        wait__( fetch(url,{method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'}),10000).then( res => {
           if (res.status == 200)
             return res.json();
           else return null;
@@ -1622,8 +1621,8 @@ self.addEventListener('message', async event => {
             ret = 'NETWORK_ERROR';
             if (info) { // [now_tm,expireMins,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
               let cipher = info[7];  // cipher is hex string
-              let url = 'https://' + cryptoHost + '/cards/greencard';
-              wait__(fetch(url,{method:'POST',body:JSON.stringify({cipher:cipher})}),30000).then( res2 => {
+              let url = 'https://' + cryptoHost + '/greencard';
+              wait__(fetch(url,{method:'POST',body:JSON.stringify({cipher:cipher}),referrerPolicy:'no-referrer'}),20000).then( res2 => {
                 if (res2.status == 200)
                   return res2.json();
                 else {
