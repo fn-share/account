@@ -104,10 +104,6 @@
   <h2 class="mt-2">NAL 软件尚未缓存</h2>
   <p class="mt-3">NAL 软件需缓存到本地后，才能提供基于 NBC 账号的相关服务，这些服务将以离线方式提供。</p>
   <p><button type="button" class="btn btn-primary shadow-none d-none" id="btn-cache-nal">缓存 NAL 软件</button><button class="btn btn-primary" type="button" id="btn-cache-busy" disabled><span class="spinner-border spinner-border-sm" role="status"></span>&nbsp; 加载中 ... </button></p>
-
-  <h2 class="mt-4">清除 NAL 软件缓存</h2>
-  <p class="mt-3">如果最近缓存 NAL 软件时出现错误，不妨点击下面按钮试试。</p>
-  <p><button type="button" class="btn btn-primary shadow-none" id="btn-del-cache">清除 NAL 软件缓存</button></p>
 </div>
 
 <div class="container-fluid d-none" name="hosting-pre-restore">
@@ -1278,10 +1274,6 @@ $( () => {
       }
       else alert('操作失败：' + res);
     });
-  });
-  
-  $('#btn-del-cache').on('click', ev => {
-    NAL.unregist();
   });
   
   $('#btn-rmv-cache').on('click', ev => {

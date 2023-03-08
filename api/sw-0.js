@@ -345,7 +345,7 @@ function setupRealManagers(info) {
   tmp.csp_plt_fp = ripemdHash(tmp.csp_plt_pubkey).slice(0,4);
   tmp.csp_pdt_pubkey = Buffer.from(info.csp_pdt_pubkey,'hex');
   tmp.csp_pdt_fp = ripemdHash(tmp.csp_pdt_pubkey).slice(0,4);
-  tmp.csp_selector = 'https://' + tmp.csp_selector;
+  tmp.csp_selector = 'https://' + info.csp_selector;
   return tmp;
 }
 
