@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+</head>
+<body>
+
+<style>
+#no-pass, #wait-pass {
+  padding: 4px 8px;
+  margin: 10px 0;
+}
+#wait-pass code {
+  font-size: .875em;
+  color: #d63384;
+}
+
+#host-desc, #realm-desc {
+  padding: 0;
+  line-height: 1rem;
+}
+#pass-word {
+  width: 10rem;
+  margin: 0;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid #ced4da;
+  outline: none;
+  
+  font-weight: 400;
+  line-height: 1.5;
+  color: #212529;
+  background-color: #fff;
+  background-clip: padding-box;
+  text-shadow: none;
+  
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  border-radius: 0.25rem;
+}
+</style>
+
+<div style="display:none; min-width:10rem" id="no-pass">当前没有授权任务</div>
+
+<div id="wait-pass">
+  <div id="host-desc">网站: <span></span></div>
+  <div id="realm-desc">授权: <code></code></div>
+  <div style="margin-top:6px"><input type="password" id="pass-word" placeholder="请输密码并击回车"></div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

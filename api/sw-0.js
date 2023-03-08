@@ -39,7 +39,12 @@ const bip66 = require('bip66');
 const ZERO = Buffer.alloc(1,0);
 
 const DEFAULT_REAL_SERVER = 'real.fn-share.com';
-const DEFAULT_CRYPTO_HOST = 'www.fn-share.com/crypto_host';
+const DEFAULT_REAL_MANAGER = { type:'',
+  'rsp_admin_pubkey':'028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
+  'csp_plt_pubkey':'03d72fa51f87d007a9c98e858bb057cb4e280ee1c8d97516af96ec1c9e13d63c36',
+  'csp_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
+  'csp_selector': 'www.fn-share.com/crypto_host',
+};
 
 function wrapCryptoBuf(msg) {
   if (msg.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
@@ -177,8 +182,7 @@ async function recycleDataStore() {
 
 function _renewCryptoHost(db, accInfo, now) {
   // default fetch timeout is indicated by the browser, chrome is 300s, firefox is 90s
-  let url = 'https://' + (accInfo.crypto_host_url || DEFAULT_CRYPTO_HOST);
-  fetch(url).then(res => res.text()).then( res2 => {
+  fetch(REAL_MANAGER.csp_selector).then(res => res.text()).then( res2 => {
     if (res2 && typeof res2 == 'string') {
       accInfo.crypto_host = res2;
       accInfo.crypto_host_tm = now;
@@ -341,6 +345,7 @@ function setupRealManagers(info) {
   tmp.csp_plt_fp = ripemdHash(tmp.csp_plt_pubkey).slice(0,4);
   tmp.csp_pdt_pubkey = Buffer.from(info.csp_pdt_pubkey,'hex');
   tmp.csp_pdt_fp = ripemdHash(tmp.csp_pdt_pubkey).slice(0,4);
+  tmp.csp_selector = 'https://' + tmp.csp_selector;
   return tmp;
 }
 
@@ -1958,11 +1963,7 @@ self.addEventListener('message', async event => {
       let bipInfo = rootBip.info();
       accInfo.psw_pubkey_head = bipInfo.psw_pubkey.slice(0,4);
       
-      accInfo.real_manager = { type:'',
-        'rsp_admin_pubkey':'028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
-        'csp_plt_pubkey':'03d72fa51f87d007a9c98e858bb057cb4e280ee1c8d97516af96ec1c9e13d63c36',
-        'csp_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
-      };
+      accInfo.real_manager = DEFAULT_REAL_MANAGER;
       await db.put('config',accInfo);
       REAL_MANAGER = setupRealManagers(accInfo.real_manager);
       
@@ -2221,24 +2222,6 @@ self.addEventListener('message', async event => {
         return;
       }
       
-      else if (msg.cmd == 'set_crypto_host_url') {
-        let ret = 'NONE', url = msg.param[2];
-        if (cfg && typeof url == 'string') {
-          if (url.indexOf('https://') == 0) url = url.slice(8).trim();
-          
-          let accInfo = await db.get('config','account');
-          if (accInfo) {
-            url = url || DEFAULT_CRYPTO_HOST;
-            accInfo.crypto_host_url = url;
-            await db.put('config',accInfo);
-            ret = {url};
-          }
-          else ret = 'NOT_READY';
-        }
-        
-        event.source.postMessage(prefix+JSON.stringify({id,result:ret}));
-        return;
-      }
       else if (msg.cmd == 'set_acc_psw') {
         let ret = 'NONE', oldPsw = msg.param[2], newPsw = msg.param[3], rsvd = msg.param[4];
         if (cfg && typeof oldPsw == 'string' && typeof newPsw == 'string' && typeof rsvd == 'string' && rsvd.length >= 3 && rsvd.length <= 5) {
@@ -2304,7 +2287,6 @@ self.addEventListener('message', async event => {
             bipInfo.phone = accInfo.phone;
             bipInfo.alternate_off = accInfo.alternate_off;
             bipInfo.real_sp = accInfo.real_sp || DEFAULT_REAL_SERVER;
-            bipInfo.crypto_host_url = accInfo.crypto_host_url || DEFAULT_CRYPTO_HOST;
           }
           ret = bipInfo;
         }
