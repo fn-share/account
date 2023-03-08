@@ -206,7 +206,7 @@ workbox.routing.registerRoute(
   async ({url, event, params}) => {
     let host = event.request.referrer || '';
     host = (host.split('://')[1] || '').split('/')[0];
-    if (host == 'localhost:9000') host = NAL_WEBHOST;  // for NAL debugging
+    // if (host == 'localhost:9000') host = NAL_WEBHOST;  // for NAL debugging
     
     let magic = 0, args = parseUrlArg(params[2]);
     if (typeof args.magic == 'string') magic = parseInt(args.magic);
@@ -1447,7 +1447,7 @@ self.addEventListener('message', async event => {
               if (item.flag == 'pspt') {
                 if (!psptAlso) return;
                 if (parseInt(item.child) >= 0x80000000) {  // is meta passport  // item.child can be 'child1,child2,child3'
-                  if (item.expired > metaExpired) ret.push(item); // not expired
+                  if (item.expired < metaExpired) ret.push(item); // not expired, negative compare
                 }
                 else ret.push(item);
               }

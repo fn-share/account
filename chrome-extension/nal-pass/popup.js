@@ -54,7 +54,11 @@ passNode.addEventListener('keypress', function(ev) {
     hexPsw += ('0' + j.toString(16)).slice(-2);
   }
   
-  // step 2: post host,realm,psw
+  // step 2: hint waiting
+  passNode.value = '';
+  passNode.setAttribute('placeholder','等待中 ...');
+  
+  // step 3: post host,realm,psw
   let urlArgs = 'pass_it?host='+encodeURIComponent(currSignHost)+'&realm='+encodeURIComponent(currSignRealm)+'&psw='+hexPsw;
   requestNAL(urlArgs, res => {
     if (res === 'OK') {
