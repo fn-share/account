@@ -1526,7 +1526,7 @@ self.addEventListener('message', async event => {
         for (let i=0; i < items.length; i++) {
           let item = items[i];
           if (item.flag == 'pspt') {
-            if (is_meta && parseInt(item.child) >= 0x80000000 && item.expired > metaExpired) {
+            if (is_meta && parseInt(item.child) >= 0x80000000 && item.expired < metaExpired) {
               card = item;
               break;
             }
