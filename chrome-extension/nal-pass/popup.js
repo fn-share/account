@@ -24,12 +24,12 @@ function requestNAL(urlArgs, callback) {
   let counter = 0;
   let tid = setInterval( () => {
     counter += 1;
-    if (last_nal_reply || counter > 30) {  // max wait 18 seconds
+    if (last_nal_reply || counter > 60) {  // max wait 18 seconds
       clearInterval(tid);
       frmNode.remove();
       callback(last_nal_reply);
     }
-  }, 600);
+  }, 300);
 }
 
 let passNode = document.querySelector('#pass-word');
