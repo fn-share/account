@@ -364,8 +364,8 @@ function enhanceFixKey(fixKey) {
   if (vdfInstance === null) return fixKey;
   
   try {
-    // iterations = 6000, intSizeBits = 512, isPietrzak = false
-    const proof = vdfInstance.generate(6000,fixKey,512,false); // less than 2 seconds mostly
+    // iterations = 4000, intSizeBits = 512, isPietrzak = false
+    const proof = vdfInstance.generate(4000,fixKey,512,false); // less than 2 seconds mostly
     return CreateHash('sha256').update(proof).digest();
   }
   catch(e) {
