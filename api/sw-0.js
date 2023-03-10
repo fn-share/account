@@ -1431,7 +1431,7 @@ self.addEventListener('message', async event => {
             metaExpired = now + (cfg.strategy?.meta_pspt_expired || 336) * 3600; // 336h is 14 days
           metaExpired = 0 - Math.min(tillTm,metaExpired);  // meta passport reused only within 12 hours by default, it can be changed by strategy.meta_pspt_expired
           
-          let range = IDBKeyRange.bound([targHost,0-tillTm],[targHost,0-now])
+          let range = IDBKeyRange.bound([targHost,0-now-1209600],[targHost,0-tillTm]);  // 1209600 is 14 days
           let items = await db.getAllFromIndex('recent_cards','host_expired',range,36); // max scan 36 cards
           
           ret = [];
