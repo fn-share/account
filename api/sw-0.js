@@ -1189,7 +1189,7 @@ const rootBip = BipAccount();
 
 async function findGreenCard(db, host, pubkey) {
   let now = Math.floor((new Date()).valueOf() / 1000);
-  let range = IDBKeyRange.upperBound([host,0-now-3600]);
+  let range = IDBKeyRange.bound([host,0-now-1209600],[host,0-now-3600]); // 1209600 is 14 days
   let items = await db.getAllFromIndex('recent_cards','host_expired',range,64);
   
   for (let i=0; i < items.length; i++) {
@@ -1431,7 +1431,7 @@ self.addEventListener('message', async event => {
             metaExpired = now + (cfg.strategy?.meta_pspt_expired || 336) * 3600; // 336h is 14 days
           metaExpired = 0 - Math.min(tillTm,metaExpired);  // meta passport reused only within 12 hours by default, it can be changed by strategy.meta_pspt_expired
           
-          let range = IDBKeyRange.upperBound([targHost,0-tillTm]);
+          let range = IDBKeyRange.bound([targHost,0-tillTm],[targHost,0-now])
           let items = await db.getAllFromIndex('recent_cards','host_expired',range,36); // max scan 36 cards
           
           ret = [];
@@ -1519,7 +1519,7 @@ self.addEventListener('message', async event => {
         let period = session_periods[sessType & 0x07];
         let now = Math.floor((new Date()).valueOf() / 1000);
         let metaExpired = 0 - now - Math.min(period,(cfg.strategy?.meta_pspt_expired || 12) * 3600);
-        let range = IDBKeyRange.upperBound([host,0-now-period]);
+        let range = IDBKeyRange.bound([host,0-now-1209600],[host,0-now-period]); // 1209600 is 14 days
         let items = await db.getAllFromIndex('recent_cards','host_expired',range,32);
         
         let card = null;
@@ -1643,9 +1643,9 @@ self.addEventListener('message', async event => {
           let suggestCard = null;
           let suggestExp = 0;
           let suggestPre = child + ',';
-          let suggestChild = null;  // default null means generating new one
+          let suggestChild = '';  // default null means generating new one
           if (reuseMins) {
-            let range = IDBKeyRange.upperBound([host,0-now+reuseMins*60]);
+            let range = IDBKeyRange.bound([host,0-now-1209600],[host,0-now+reuseMins*60]); // 1209600 is 14 days
             let items = await db.getAllFromIndex('recent_cards','host_expired',range,36);
             
             for (let i=0; i < items.length; i++) {
@@ -1657,10 +1657,6 @@ self.addEventListener('message', async event => {
                   if (suggestExp > now + 3600) // at least expiring after 1 hour
                     suggestCard = item; // reuse it, card maybe just recent expired, it must already report to RSP
                   break;
-                }
-                else {
-                  if (!suggestChild)  // try first matched
-                    suggestChild = item.child.slice(suggestPre.length);
                 }
               }
             }
