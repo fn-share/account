@@ -152,6 +152,7 @@ window.addEventListener('load', function() {
       else if (typeof msg.notify == 'string') { // all notifications will transmit to parent
         owner_frame_?.postMessage(event.data,'*');
       }
+      // else, ignore others, includes: msg={} that reply for {cmd:'shakehand'}
     }
     else { // retransmission call
       owner_frame_?.postMessage(event.data,'*');
@@ -204,9 +205,17 @@ window.addEventListener('load', function() {
   }
 });
 
+let shakehandTask = 0;
+
 function on_sw_ready() {
   if (owner_frame_ && sw_client_) {  // notify 'ver_info'
     owner_frame_.postMessage(JSON.stringify({notify:'ver_info',param:[app_version_]}),'*');
+    
+    if (!shakehandTask) {
+      shakehandTask = setInterval( () => {
+        sw_client_.postMessage('?{"cmd":"shakehand"}');
+      },2500);  // shakehand every 2.5 seconds
+    }
   }
 }
 </script>

@@ -1207,7 +1207,10 @@ self.addEventListener('message', async event => {
     let msg = JSON.parse(prefix? event.data.slice(1): event.data);
     let id = msg.id || 0;
     
-    if (msg.cmd == 'list_wait_sign') {  // most often call, so we put it at the first
+    if (msg.cmd == 'shakehand') {
+      event.source.postMessage(prefix+'{}');
+    }
+    else if (msg.cmd == 'list_wait_sign') {  // most often call, so we put it at the first
       if (!rootBip.hasInit()) {
         event.source.postMessage(prefix+JSON.stringify({id,result:'WAIT_PASS'}));
         return;
