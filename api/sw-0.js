@@ -334,7 +334,7 @@ function enhanceFixKey(fixKey) {
   return ha.digest();
 } */
 
-let vdfInstance  = null;
+let vdfInstance  = location.hostname == 'localhost'? undefined: null;
 let REAL_MANAGER = null;
 
 function setupRealManagers(info) {
@@ -349,19 +349,30 @@ function setupRealManagers(info) {
   return tmp;
 }
 
-setTimeout( async () => {
+async function tryInitVdf() {
   let accInfo = await (await wallet_db).get('config','account');
   if (accInfo?.real_manager)
     REAL_MANAGER = setupRealManagers(accInfo.real_manager);
   
   if (location.hostname != 'localhost') {  // no VDF when debugging at localhost
-    const createVdf = require('@subspace/vdf').default;
-    vdfInstance = await createVdf();
+    console.log('start build VDF for SW ...');
+    try {
+      const createVdf = require('@subspace/vdf').default;
+      vdfInstance = await createVdf();
+      if (vdfInstance) console.log('... build VDF finished');
+    }
+    catch(e) {
+      console.log(e);
+      vdfInstance = null;
+    }
   }
-}, 3000);
+}
+
+if (vdfInstance === null) setTimeout(tryInitVdf,3000);
 
 function enhanceFixKey(fixKey) {
-  if (vdfInstance === null) return fixKey;
+  if (vdfInstance === null) setTimeout(tryInitVdf,0);
+  if (!vdfInstance) return fixKey;  // if vdfInstance === undefined, current is localhost
   
   try {
     // iterations = 4000, intSizeBits = 512, isPietrzak = false
@@ -2121,6 +2132,7 @@ self.addEventListener('message', async event => {
     
     else if (msg.cmd == 'vdf_result') {
       let ret = Buffer.from(msg.param[0],'hex'), loop = parseInt(msg.param[1]) || 10000;
+      if (vdfInstance === null) setTimeout(tryInitVdf,0);
       if (vdfInstance) {
         try {
           ret = vdfInstance.generate(loop,ret,512,false); // intSizeBits=512, isPietrzak=false
