@@ -38,42 +38,66 @@ let currServerNonce = null;
 let currSignHost = ''
 let currSignRealm = '';
 
-passNode.addEventListener('keypress', function(ev) {
-  if (ev.keyCode != 13) return;
-  if (!currServerNonce || currServerNonce.length != 16) return;
-  if (!currSignHost || !currSignRealm) return;
+let passCallbacks = ( () => {
+  let last_hex_psw = '';
+  let last_host = '';
+  let last_pass_tm = 0;
   
-  // step 1: get hex password string
-  let psw = passNode.value;
-  if (!psw) return;
-  psw = (new TextEncoder('utf-8')).encode(psw);
-  
-  let hexPsw = '';
-  for (let i=0; i < psw.length; i++) {
-    let j = psw[i] ^ currServerNonce[i%16];
-    hexPsw += ('0' + j.toString(16)).slice(-2);
+  function verifyPass(hexPsw) {
+    let urlArgs = 'pass_it?host='+encodeURIComponent(currSignHost)+'&realm='+encodeURIComponent(currSignRealm)+'&psw='+hexPsw;
+    requestNAL(urlArgs, res => {
+      if (res === 'OK') {
+        last_hex_psw = hexPsw;
+        last_host = currSignHost;
+        last_pass_tm = (new Date()).valueOf();
+        
+        passNode.value = '';
+        passNode.setAttribute('placeholder','授权成功');
+        passNode.disabled = true;
+        setTimeout(() => window.close(),1200);
+      }
+      else if (res === 'WAIT_PASS') {
+        passNode.value = '';
+        passNode.setAttribute('placeholder','密码错误，请再试');
+      }
+      else alert('系统报错：' + res);
+    });
   }
   
-  // step 2: hint waiting
-  passNode.value = '';
-  passNode.setAttribute('placeholder','等待中 ...');
+  function onKeyPress(ev) {
+    if (ev.keyCode != 13) return;
+    if (!currServerNonce || currServerNonce.length != 16) return;
+    if (!currSignHost || !currSignRealm) return;
+    
+    // step 1: get hex password string
+    let psw = passNode.value;
+    if (!psw) return;
+    psw = (new TextEncoder('utf-8')).encode(psw);
+    
+    let hexPsw = '';
+    for (let i=0; i < psw.length; i++) {
+      let j = psw[i] ^ currServerNonce[i%16];
+      hexPsw += ('0' + j.toString(16)).slice(-2);
+    }
+    
+    // step 2: hint waiting
+    passNode.value = '';
+    passNode.setAttribute('placeholder','等待中 ...');
+    
+    // step 3: post host,realm,psw
+    verifyPass(hexPsw);
+  }
   
-  // step 3: post host,realm,psw
-  let urlArgs = 'pass_it?host='+encodeURIComponent(currSignHost)+'&realm='+encodeURIComponent(currSignRealm)+'&psw='+hexPsw;
-  requestNAL(urlArgs, res => {
-    if (res === 'OK') {
-      passNode.value = '';
-      passNode.setAttribute('placeholder','授权成功');
-      passNode.disabled = true;
-      setTimeout(() => window.close(),1200);
-    }
-    else if (res === 'WAIT_PASS') {
-      passNode.value = '';
-      passNode.setAttribute('placeholder','密码错误，请再试');
-    }
-    else alert('系统报错：' + res);
-  });
-},false);
+  function tryReusePsw(hostStr) {
+    if (last_host == hostStr && (new Date()).valueOf() - last_pass_tm < 3000) // within 3 seconds 
+      return last_hex_psw;
+    else return '';
+  }
+  
+  return [onKeyPress,tryReusePsw,verifyPass];
+})();
+
+passNode.addEventListener('keypress',passCallbacks[0],false);
 
 chrome.tabs.query({active:true,currentWindow:true}, function(tabs) {
   let tab = tabs[0];
@@ -96,7 +120,11 @@ chrome.tabs.query({active:true,currentWindow:true}, function(tabs) {
       
       document.querySelector('#host-desc span').innerHTML = currSignHost;
       document.querySelector('#realm-desc code').innerHTML = res === '@'? 'pass': res;
-      passNode.focus();
+      
+      let hexPsw = passCallbacks[1](currSignHost);
+      if (hexPsw)
+        passCallbacks[2](hexPsw); // try reuse recent inputting
+      else passNode.focus();      // wait inputting password
     });
   });
   
