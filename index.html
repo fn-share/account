@@ -339,8 +339,7 @@ var sw_notifies_ = {
 
 window.addEventListener('message', function(ev) {
   if (ev.source !== accFrameNode.contentWindow) {
-    console.log('here20',typeof ev.data,ev.data);
-    if (ev.data && ev.data.slice(0,10) == 'CHAN_INFO:') {
+    if (typeof ev.data == 'string' && ev.data.slice(0,10) == 'CHAN_INFO:') {
       let s = ev.data.slice(10);
       let idx = s.indexOf(':');
       if (idx > 0) {
