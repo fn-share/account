@@ -41,6 +41,10 @@
   outline: none;
   resize: none;
 }
+
+.pagination .page-link {
+  cursor: default;
+}
 </style>
 
 <div class="toast fade" role="alert" id="msg-toast" style="position:fixed; left:calc(50vw - 175px); top:10px; background-color:rgba(255,255,255,0.96); z-index:1055">
@@ -104,12 +108,6 @@
 <!-- top block: hosting -->
 <div class="container-lg d-none" name="block-hosting"><div class="row g-3 mt-2 pt-2 pb-2">
 
-<div class="container-fluid d-none" name="hosting-pre-install">
-  <h2 class="mt-2">NAL 软件尚未缓存</h2>
-  <p class="mt-3">NAL 软件需缓存到本地后，才能提供基于 NBC 账号的相关服务，这些服务将以离线方式提供。</p>
-  <p><button type="button" class="btn btn-primary shadow-none d-none" id="btn-cache-nal">缓存 NAL 软件</button><button class="btn btn-primary" type="button" id="btn-cache-busy" disabled><span class="spinner-border spinner-border-sm" role="status"></span>&nbsp; 加载中 ... </button></p>
-</div>
-
 <div class="container-fluid d-none" name="hosting-pre-restore">
   <h2 class="mt-2">在本机创建账号</h2>
   <p class="mt-4">手机号与助记语一起用于推导账号，其中手机号末尾 4 个数字用作缺省的保留字（以后可改）。助词语（即，脑词）是您最难忘，别人又难猜的一句话，请妥善保管助记语，它属于关键机密，恢复账号会用到。</p>
@@ -157,13 +155,8 @@
 <h2 class="mt-5 mb-4">当前版本</h2>
 <div class="alert alert-primary mb-2 text-break" role="alert">
   <span id="ver-no">库版本号：</span><br>
-  <span id="ver-size">版本容量：</span><br>
   <span id="ver-time">安装时间：</span>
 </div>
-<h2 class="mt-5 mb-4">清除 NAL 缓存</h2>
-<p class="mb-3">重装 NAL 软件或重置账号之前需清除缓存，如果您想维持当前账号状态，请不要点击下面按钮。</p>
-<p class="mb-3"><span id="newest-nal-ver"></span></p>
-<p class="mb-4"><button type="button" class="btn btn-primary" id="btn-rmv-cache">清除 NAL 软件缓存</button></p>
 </div>  <!-- end of #list-abstract  -->
 
 <div class="tab-pane fade" id="list-psw" role="tabpanel">
@@ -257,6 +250,10 @@
 
 <div class="tab-pane fade" id="list-card" role="tabpanel">
 <h2 class="mb-4">卡证列表</h2>
+<div class="d-none mt-5" id="no-hostcard-area">
+  <p class="mb-3">尚无卡证。</p>
+  <p><button type="button" class="btn btn-success shadow-none" id="btn-refresh-hostcard">刷新</button></p>
+</div>
 <div class="list-group mt-5 d-none" role="tablist" id="hostcard-table-area"></div>
 <div class="mt-3 d-none" style="height: 3rem;" id="hostcard-page-area">
   <nav class="float-start pe-2"><ul class="pagination"></ul></nav>
@@ -306,241 +303,151 @@
 <div class="m-2 mt-3"><a target="_blank" href="https://netlog.fn-share.com/">免费网志</a></div>
 </div></div>
 
-<iframe style="display:none" data-src="api/last/bridge.html" id="nbc-account"></iframe>
-
 <div class="d-none"><input type="file" id="file_selector"></div>
 
 <script src="js/jquery-3.6.0.slim.min.js"></script>
 <script src="js/popper.min.js"></script>
 <script src="js/bootstrap.min.js"></script>
 
-<script src="api/0/nbc_base-0.1.min.js"></script>
+<script src="js/nbc_base-0.1.min.js"></script>
 
 <script>
 const NAL = ( function() {
 
+const NAL_BUFF_SIZE = 16;
+
 var sw_call_idx_ = 0;
-var sw_call_buf_ = []; // waiting buffer for NAL_.call_()
 
-var app_version_  = null;
-var app_abnormal_ = '';
+var sw_magic_   = null;
+var sw_channel_ = {};   // { strategy_ver, host }
+var sw_storage_ = null;
+var sw_verInfo_ = null;
 
-var sw_magic_ = null;
-var sw_channel_ = {};  // { strategy_ver, host }
-
-var sw_notifies_ = {
-  ver_info(param) {
-    app_version_ = param[0];
-    if (app_version_ === null)
-      app_abnormal_ = param[1]+''; // can be: none, installing, installed, activating, activated, redundant
-    else app_abnormal_ = '';
-  },
-};
+var _msg_buff = [];
 
 window.addEventListener('message', function(ev) {
-  if (ev.source !== accFrameNode.contentWindow) {
-    if (typeof ev.data == 'string' && ev.data.slice(0,10) == 'CHAN_INFO:') {
-      let s = ev.data.slice(10);
-      let idx = s.indexOf(':');
-      if (idx > 0) {
-        sw_magic_ = parseInt(s.slice(0,idx)) || 0;
-        try {
-          sw_channel_ = JSON.parse(s.slice(idx+1));
-        }
-        catch(e) {
-          console.log(e);
-        }
-      }
+  if (ev.source === window && typeof ev.data == 'string' && ev.data.slice(0,8) === 'NAL_RPY:') {
+    try {
+      let obj = JSON.parse(ev.data.slice(8));
+      _msg_buff.push([obj.id || 0,obj.result]);
+      while (_msg_buff.length > NAL_BUFF_SIZE) _msg_buff.shift();
     }
-    return;
-  }
-  
-  let msg = JSON.parse(ev.data), msg_id = msg.id;
-  if (typeof msg_id == 'number') {
-    for (let i=0,item; item=sw_call_buf_[i]; i++) {
-      if (item[0] === msg_id) {
-        sw_call_buf_.splice(i,1); // remove from calling buffer
-        if (typeof msg.error == 'string')
-          item[2](new Error(msg.error)); // reject(err)
-        else item[1](msg);        // resove({id,result})
-        break;
-      }
-    }
-  }
-  else if (typeof msg.notify == 'string') {
-    let fn = sw_notifies_[msg.notify];
-    if (fn) fn(msg.param || []);
+    catch(e) {}
   }
 });
 
-let accFrameNode = document.querySelector('#nbc-account');
-if (!accFrameNode || accFrameNode.nodeName != 'IFRAME') {
-  accFrameNode = document.createElement('iframe');
-  accFrameNode.setAttribute('id','nbc-account');
-  accFrameNode.setAttribute('style','display:none');
-  accFrameNode.setAttribute('src','/account/api/last/bridge.html');
-  document.body.appendChild(accFrameNode);
-}
-else accFrameNode.setAttribute('src',accFrameNode.dataset.src); // assign src after message listen started
-
-let NAL_ = {
-  verInfo(info) { // reconstruct json to avoid side effects
-    if (info) {
-      app_version_ = JSON.parse(JSON.stringify(info));
-      app_abnormal_ = '';
-    }
-    return app_version_? JSON.parse(JSON.stringify(app_version_)): null;
-  },
-  
-  swMagic(magic, callback) {
-    if (magic === undefined)
-      return sw_magic_;
+const _NAL = {
+  // NAL.call_(cmd,param).then(res => console.log(res))
+  //   .catch(err => console.log(err))
+  //   .finally(() => console.log('finally do something'))
+  call_(cmd, param, wait) {
+    sw_call_idx_ += 1;
+    let new_id = sw_call_idx_;
+    if (!wait) wait = 5000;  // default max wait 5 seconds
     
-    sw_magic_ = null;
-    if (magic === null)
-      return null;
-    
-    let nd = document.createElement('a');
-    nd.setAttribute('href',accFrameNode.getAttribute('src'));
-    let loc = nd.origin + '/account/api/online/regist_magic?magic=' + magic;
-    let frmNode = document.createElement('iframe');
-    frmNode.setAttribute('style','display:none');
-    frmNode.setAttribute('src',loc);
-    document.body.appendChild(frmNode);
-    
-    let counter = 0;
-    let tid = setInterval( () => {
-      counter += 1;
-      if (sw_magic_ !== null || counter > 30) {  // max wait 9 seconds
-        clearInterval(tid);
-        frmNode.remove();
-        if (callback) callback(sw_magic_);
-      }
-    }, 300);
-  },
-  
-  swHost() {
-    return sw_channel_.host || 'account.nb-chain.cn';
-  },
-  
-  strategyVer() {
-    return sw_channel_.strategy_ver || 0;
-  },
-  
-  waitReady(wait) {
-    let resolve_fn = null, reject_fn = null;
-    let wait_ready = new Promise( (resolve,reject) => {
+    let resolve_fn, reject_fn;
+    let waitObj = new Promise( (resolve, reject) => {
       resolve_fn = resolve;
       reject_fn = reject;
     });
     
-    let waitNum = wait || 60;  // default wait 60 seconds
-    let ticks = 0, tid = setInterval( () => {
-      if (app_version_) {
-        app_abnormal_ = '';
-        clearInterval(tid);
-        resolve_fn(NAL_.verInfo());
+    let counter = 0;
+    let taskId = setInterval( () => {
+      counter += 250;
+      if (counter >= wait) {
+        clearInterval(taskId);
+        console.log('NAL request timeout: ' + cmd);
+        reject_fn(new Error('TIMEOUT'));
       }
       else {
-        if (app_abnormal_) { // state changed
-          clearInterval(tid);
-          resolve_fn(app_abnormal_);
-        }
-        else {
-          ticks += 1;
-          if (ticks > waitNum) {
-            clearInterval(tid);
-            reject_fn(new Error('TIMEOUT'));
+        let succ = false, found = null, oldest = new_id - 128;
+        for (let i=_msg_buff.length-1; i >= 0; i--) {
+          let item = _msg_buff[i], itemId = item[0];
+          if (itemId === new_id) {
+            _msg_buff.splice(i,1);
+            found = item[1];
+            succ = true;
           }
-          // else, continue checking
+          else if (itemId < oldest)
+            _msg_buff.splice(i,1);  // remove too old reply item
+        }
+        
+        if (succ) {
+          clearInterval(taskId);
+          resolve_fn(found);
         }
       }
-    }, 1000);
-    
-    return wait_ready;
-  },
-  
-  renewState() {
-    // renew bridge state, auto cache NAL if nesseary, wait ready for restore hosting
-    accFrameNode.contentWindow.postMessage('RENEW','*');
-  },
-  
-  unregist() {
-    navigator.serviceWorker.getRegistrations().then( items => {
-      let reg = null;
-      for (let i=0,item; item=items[i]; i++) {
-        if (item.active && item.active.scriptURL.indexOf('/account/api/sw-') > 0) {
-          reg = item;
-          break;
-        }
-      }
-      if (!reg) {
-        console.log('no active SW found.');
-        return;
-      }
-      
-      if (app_version_) {
-        NAL_.call_('clear_cache').then( res => {
-          console.log('clear cache ' + res);
-          tryUnregist(reg);
-        });
-      }
-      else tryUnregist(reg);
-    });
-    
-    function tryUnregist(reg) {
-      reg.unregister().then( is_succ => {
-        if (is_succ)
-          alert('已提交 service worker 注销操作，请重启浏览器使之生效。');
-        else alert('注销 service worker 失败');
-      });
-    }
-  },
-  
-  registNoti(name, callback) {  // callback(param), when callback is null means remove
-    if (callback === null)
-      delete sw_notifies_[name];
-    else sw_notifies_[name] = callback;
-  },
-  
-  call_(cmd, param, wait) {
-    if (sw_call_buf_.length > 16) throw Error('SW_CALL_BUSY');
-    
-    sw_call_idx_ += 1;
-    let new_id = sw_call_idx_;
-    let msg_caller = new Promise( (resolve,reject) => {
-      sw_call_buf_.push([new_id,resolve,reject])
-    });
+    }, 250);
     
     if (!param) param = [];
-    accFrameNode.contentWindow.postMessage(JSON.stringify({id:new_id,cmd,param}),'*');
+    window.postMessage('NAL_REQ:'+JSON.stringify({id:new_id,cmd,param}));
     
-    let abort_fn = null;
-    let abortable = Promise.race([ msg_caller,
-      new Promise( function(resolve, reject) {
-        abort_fn = function() { reject(new Error('TIMEOUT')) };
-      })
-    ]);
-    setTimeout(()=>abort_fn(),wait||5000); // default wait 5 seconds
+    return waitObj;
+  },
+  
+  verInfo(info) { // reconstruct json to avoid side effects
+    if (info) sw_verInfo_ = info;  // set ver info
+    return sw_verInfo_;
+  },
+  
+  swMagic(callback, magic, wait) {
+    let oldValue = sw_magic_;
+    if (!callback) {   // read sw_magic_
+      if (typeof magic == 'number')
+        sw_magic_ = magic;
+      return oldValue;
+    }
+    // else, reset sw_magic_
     
-    return abortable.then( res => res.result, e => {
-      for (let i=0,item; item=sw_call_buf_[i]; i++) {
-        if (item[0] == new_id) {
-          sw_call_buf_.splice(i,1);  // remove from calling buffer
-          break;
-        }
-      }
-      return e.message || 'UNKNOWN'; // maybe 'TIMEOUT', maybe res.error
+    sw_magic_ = null;
+    _NAL.call_('regist_magic',null,wait || 5000).then( res => {  // default max wait 5 seconds
+      sw_magic_ = res.sw_magic;
+      sw_channel_ = { strategy_ver:res.strategy_ver, host:res.host };
+      sw_storage_ = res.storage;
+      sw_verInfo_ = res.ver_info;
+      callback(sw_magic_);
+    }).catch(err => callback(null));
+    
+    return oldValue;
+  },
+  
+  swHost() {
+    return sw_channel_.host || '';
+  },
+  
+  strategyVer() {
+    return sw_channel_.strategy_ver;  // null means not ready
+  },
+  
+  swStorage() {
+    return sw_storage_;
+  },
+  
+  waitReady(wait) {
+    let resolve_fn, reject_fn;
+    let waitObj = new Promise( (resolve, reject) => {
+      resolve_fn = resolve;
+      reject_fn = reject;
     });
+    
+    _NAL.swMagic( magic => {
+      if (magic === null)
+        reject_fn(new Error('FAILED'));
+      else resolve_fn(sw_verInfo_);
+    }, null, wait);
+    
+    return waitObj;
   },
 };
 
-return NAL_;
+return _NAL;
 })();
 
 NAL.dialog = ( () => {
 
 let inShowing = false;
+
+NAL.dialogShowing = function() { return inShowing; };
 
 function noResponse(e) {
   e.stopPropagation();
@@ -566,10 +473,11 @@ function closeDialog() {
   inShowing = false;
 }
 
-let nalDialogResolve = null, nalDialogReject = null; // hide here for security
+let nalDialogResolve = null, nalDialogReject = null;
 let nalCheckPassId = 0;
 
-return ( (name,args) => {
+// define NAL.dialog(name,args)
+return ( (name, args) => {
   if (!name) return inShowing;  // query in showing or not
   
   if (inShowing) {
@@ -704,7 +612,7 @@ return ( (name,args) => {
 
 })(); // assign to NAL.dialog
 
-NAL.call = function(cmd, param, wait) {
+NAL.call = function(cmd, param, wait) {  // wrap WAIT_PASS process on NAL.call_()
   return NAL.call_(cmd,param,wait).then( res => {
     if (res === 'WAIT_PASS')
       return passAndCall(1);
@@ -721,9 +629,9 @@ NAL.call = function(cmd, param, wait) {
             throw Error('PASSWORD_ERROR');
           return passAndCall(counter+1);
         }
-        else throw Error('SYS_NOT_READY');
+        else throw Error('SYS_NOT_READY'); // can catch by: NAL.call(...).catch(err => ...)
       });
-    });  // throw Error('CANCELED') when inputting psw canceled
+    }); // maybe throw Error('CANCELED') when inputting psw canceled
   }
 };
 </script>
@@ -764,7 +672,7 @@ function parseUrlArg(arg) {
   return d;
 }
 
-function wait__(promise_obj, wait) {
+async function wait__(promise_obj, wait) {
   let abort_fn = null;
   let abortable_promise = Promise.race([ promise_obj,
     new Promise( function(resolve, reject) {
@@ -772,12 +680,12 @@ function wait__(promise_obj, wait) {
     })
   ]);
   
-  setTimeout(()=>abort_fn(),wait);
+  setTimeout(()=>abort_fn(),wait || 30000);
   return abortable_promise;
 }
 
 function url_fetch(url, callback, options, timeout) {
-  wait__(fetch(url,options),timeout || 30000).then( res => {
+  wait__(fetch(url,options),timeout).then( res => {
     if (res.status == 200)
       return res.json();
     else return null;   // ignore other res.status
@@ -864,7 +772,7 @@ function holdingSW() {
   
   let authList = $('#wait-auth-list');
   holding_sw_id = setInterval( () => {
-    NAL.call_('list_wait_sign',[NAL.swHost(),NAL.swMagic()]).then( res => {
+    NAL.call_('list_wait_sign',[NAL.swMagic()]).then( res => {
       if (res === 'WAIT_PASS') {
         if (authList.find('.card[name="WAIT_PASS"]').length == 0) {
           authList.html('<div class="card m-1" name="WAIT_PASS" style="width:22rem"><div class="card-body"><h5 class="card-title">account.nb-chain.cn</h5><p class="card-text"><span>授权给: </span><code>pass</code></p><form onsubmit="return false"><input class="form-control form-control-md mt-3" type="password" autocomplete="off" placeholder="输入密码并击回车" style="width:16rem"></form></div></div>');
@@ -899,7 +807,7 @@ function holdingSW() {
                   let targHost = nd.parents('.card').attr('name');
                   if (!targHost) return;
                   
-                  NAL.call_('do_wait_sign',[psw,NAL.swHost(),NAL.swMagic(),targHost]).then( res => {
+                  NAL.call_('do_wait_sign',[psw,NAL.swMagic(),targHost]).then( res => {
                     if (typeof res == 'string') {
                       if (res == 'WAIT_PASS') return alert('密码不正确');
                       if (res == 'OK')
@@ -913,7 +821,7 @@ function holdingSW() {
               node.find('button').on('click', ev => {
                 let targHost = $(ev.target).parents('.card').attr('name');
                 if (!targHost) return;
-                NAL.call('rmv_wait_sign',[NAL.swHost(),NAL.swMagic(),targHost]).then( res => {
+                NAL.call('rmv_wait_sign',[NAL.swMagic(),targHost]).then( res => {
                   if (typeof res == 'string') {
                     if (res == 'OK')
                       authList.html('');
@@ -947,11 +855,6 @@ function unholdSW() {
   }
 }
 
-function showInstallBusy(isBusy) {
-  $('#btn-cache-nal').toggleClass('d-none',isBusy);
-  $('#btn-cache-busy').toggleClass('d-none',!isBusy);
-}
-
 var _currAlterOff = 0;
 
 function showHostingTask(task) {
@@ -963,11 +866,11 @@ function showHostingTask(task) {
   });
   
   if (task == 'main') {
-    NAL.swMagic(parseInt(generateRand(6).toString('hex'),16), magic => {
+    NAL.swMagic( magic => {
       if (typeof magic != 'number')
         return alert('申请 service worker 事务 ID 出错');
-
-      NAL.call('acc_summary',[NAL.swHost(),magic],20000).then( res => {
+      
+      NAL.call('acc_summary',[magic],20000).then( res => {
         if (typeof res == 'string')
           alert('查询账号失败：' + res);
         else showAccount(res);
@@ -979,14 +882,6 @@ function showHostingTask(task) {
     // step 1: show account info
     _currAlterOff = info.alternate_off || 0;
     
-    wait__(fetch('/account/api/version.txt'),30000).then( res => {
-      if (res.status != 200)
-        throw new Error('FETCH_FAILED');
-      else return res.text();
-    }).then( ver => {
-      $('#newest-nal-ver').text(`当前最新 NAL 版本为 v${ver}。`);
-    }).catch(e => console.log(e));
-    
     // $('#acc-alter').text('小号序号：' + info.alternate_off);
     // $('#dev-fp').text('设备指纹：' + info.figerprint);  // DEV-ACC
     // $('#did-fp').text('根身指纹：' + info.did_figerprint); // ALT-ACC
@@ -997,7 +892,6 @@ function showHostingTask(task) {
     
     let tm = new Date(info.install_time * 1000);
     $('#ver-no').text('库版本号：NAL v' + info.ver);
-    $('#ver-size').text('版本容量：' + info.pkg_size + ' 字节');
     $('#ver-time').text('安装时间：' + tm.toLocaleString());
     
     // step 2: start app
@@ -1039,7 +933,7 @@ function _navClick(navName) {
 }
 
 function createAccount(targBtn) {
-  if (!NAL.verInfo())
+  if (NAL.swMagic() === null)
     return alert('NAL 未就绪');
   
   // step 1: prepare phone, mnemonic, password
@@ -1116,13 +1010,17 @@ function createAccount(targBtn) {
     figerprint: figerprint.toString('hex'),  // DEV-ACC
     hosting_data: hosting,
   };  // will add more: rsvd_list, rsvd_index, name, psw_pubkey_head, regist_time
-  NAL.call_('save_account',[psw,accInfo],30000).then( res => {
+  NAL.call_('save_account',[psw,accInfo],10000).then( res => {
     loadingEle.addClass('d-none');
-    if (res !== 'OK')
+    
+    if (res == 'SW_NOT_READY') {
+      alert('SW 未就绪');
+    }
+    else if (res !== 'OK')
       alert('保存账号失败');  // normally would not happen 
     else {
       NAL.call_('ver_info').then( data2 => {
-        if (typeof data2 != 'string' && data2.ver) {
+        if (data2 && data2.acc_type) {
           NAL.verInfo(data2);
           showHostingTask('main');
           alert('创建账号成功');
@@ -1137,79 +1035,22 @@ $( () => {
   all_nav_items.on( 'click', ev => _navClick($(ev.target).attr('name')) );
   _navClick('about');
   
-  $('#btn-cache-nal').on( 'click', ev => {
-    if (!('serviceWorker' in navigator))
-      return alert('浏览器不支持 Service Worker');
-    
-    tempDisableBtn(ev.target);
-    showInstallBusy(true);
-    
-    navigator.serviceWorker.register('api/sw-0.js').then( reg => {
-      console.log('regist SW OK');
-      
-      let taskLoop = 0;
-      let taskId = setInterval( () => {
-        let client = reg.active;
-        if (!client) {  // registration should go active soon
-          if (++taskLoop > 30) {  // max wait 30 seconds for registing sw.js
-            console.log('waiting SW active failed');
-            showInstallBusy(false);
-            clearInterval(taskId);
-          }
-          return;
-        }
-        
-        clearInterval(taskId);
-        if (client.state == 'activated') {
-          NAL.waitReady(90).then( verInfo => {  // max waiting 90 seconds for caching files
-            if (verInfo.acc_type === 'restorable' || !verInfo.acc_type) {
-              // 'restorable' means reuse history tables in indexedDB, undefined means first install (no DB yet)
-              showInstallBusy(false);
-              showHostingTask('restore');
-            }
-            // else, unknown state
-          }).catch(e => showInstallBusy(false));
-          NAL.renewState();
-        }
-        else showInstallBusy(false);
-      }, 1000);
-    }).catch( e => {
-      console.log('regist SW fail:',e);
-    });
-  });
-  
   $('#btn-create-acc').on('click', ev => {
     createAccount(ev.target);
   });
   
-  NAL.waitReady(30).then( verInfo => {
-    if (typeof verInfo == 'string') {  // get ver_info failed
-      if (verInfo == 'none') {
-        showInstallBusy(false);
-        showHostingTask('install');
-      }
-      else {
-        console.log('SW state: ' + verInfo);
-        return alert('service worker 已安装但未正常激活，请重启浏览器，或关机重启再试');
-      }
+  NAL.waitReady(5000).then( verInfo => {
+    if (verInfo === null) {
+      console.log('BIP account is not ready.');
+      showHostingTask('restore');
     }
     else {
-      if (verInfo.acc_type === 'restorable') {
-        console.log('BIP account is ready.');
-        showHostingTask('main');
-      }
-      else {
-        console.log('BIP account is not ready.');
-        showHostingTask('restore');
-      }
+      console.log('BIP account is ready.');
+      showHostingTask('main');
     }
   }).catch( e => {
-    if (e.message == 'TIMEOUT')
-      alert('等待超时，请检查网络通信');
-    else {
-      console.log(e);
-      alert('NAL 运行环境异常');
-    }
+    if (e.message == 'FAILED')
+      alert('未发现 NAL 插件');
   });
 });
 
@@ -1277,7 +1118,7 @@ $( () => {
     tempDisableBtn(ev.target);
     
     // step 2: change psw and rsvd
-    NAL.call_('set_acc_psw',[NAL.swHost(),NAL.swMagic(),currPsw,newPsw,rsvdWord]).then( res => {
+    NAL.call_('set_acc_psw',[NAL.swMagic(),currPsw,newPsw,rsvdWord]).then( res => {
       if (res === 'WAIT_PASS')
         alert('操作失败：密码不正确');
       else if (res == 'OK') {
@@ -1289,15 +1130,6 @@ $( () => {
       }
       else alert('操作失败：' + res);
     });
-  });
-  
-  $('#btn-rmv-cache').on('click', ev => {
-    let s = NAL.verInfo()?.ver || '';
-    if (s) s = 'v' + s + ' ';
-    if (confirm('您真的想清除 NAL ' + s + '软件缓存吗？')) {
-      unholdSW();
-      NAL.unregist();
-    }
   });
 });
 </script>
@@ -1322,7 +1154,7 @@ $( () => {
       else return null;
     }, e => null).then( data => {
       if (data && data.rsp_admin_pubkey) {
-        NAL.call_('set_real_managers',[NAL.swHost(),NAL.swMagic(),url,data]).then( res2 => {
+        NAL.call_('set_real_managers',[NAL.swMagic(),url,data]).then( res2 => {
           if (res2 === 'OK')
             alert('更改成功');
           else alert('操作失败');
@@ -1375,7 +1207,7 @@ $( () => {
     if (!confirm('停用真身服务后，您在该服点将无法申请护照，确认要继续执行停用吗？')) return;
     
     NAL.dialog('pass').then( psw => {
-      NAL.call_('sign_disabling',[NAL.swHost(),NAL.swMagic(),psw]).then( res => {
+      NAL.call_('sign_disabling',[NAL.swMagic(),psw]).then( res => {
         if (typeof(res) == 'string') {
           if (res == 'NEED_PASS')
             alert('密码不正确');
@@ -1468,7 +1300,7 @@ $( () => {
     }
     
     tempDisableBtn(ev.target);
-    NAL.call_('set_selfsign',[NAL.swHost(),NAL.swMagic(),no]).then( res => {
+    NAL.call_('set_selfsign',[NAL.swMagic(),no]).then( res => {
       if (res && res.result === 'OK') {
         $('#my-selfsign-no').text(res.selfsign_no+'');
         $('#my-selfsign-pub').text(res.selfsign_pubkey);
@@ -1517,7 +1349,7 @@ $( () => {
     let s48 = getAvatarImg(48,48,imgNode);
     let s32 = getAvatarImg(32,32,imgNode);
     
-    NAL.call_('set_nick_avatar',[NAL.swHost(),NAL.swMagic(),nick,s200,s160,s120,s80,s48,s32]).then( res => {
+    NAL.call_('set_nick_avatar',[NAL.swMagic(),nick,s200,s160,s120,s80,s48,s32]).then( res => {
       if (res && res.result === 'OK')
         alert('保存配置成功');
       else {
@@ -1566,7 +1398,7 @@ function scanCardTag(card, tag) {
 
 function jumpHostcardPage(currIdx, renew) {
   if (renew) {
-    NAL.call_('count_cards',[NAL.swHost(),NAL.swMagic()]).then( res => {
+    NAL.call_('count_cards',[NAL.swMagic()]).then( res => {
       if (!(res instanceof Array)) return;  // 'NONE' or meet error
       
       res.sort((a,b) => a[0] >= b[0]? 1: -1);
@@ -1578,6 +1410,12 @@ function jumpHostcardPage(currIdx, renew) {
   
   function updatePage(currIdx) {
     let pgNum = Math.ceil(curr_hostcard.length / 10);  // maybe 0
+    if (pgNum <= 0) {
+      $('#no-hostcard-area').removeClass('d-none');
+      $('#hostcard-table-area, #hostcard-page-area, #hostcard-info-area, #hostcard-op-area').addClass('d-none');
+      return;
+    }
+    
     if (currIdx < 0) currIdx = pgNum - 1;
     currIdx = Math.max(0,Math.min(currIdx,pgNum-1));
     hostcard_pg_idx = currIdx;
@@ -1620,7 +1458,7 @@ function jumpHostcardPage(currIdx, renew) {
     $('#hostcard-page-area').removeClass('d-none');
     $('#hostcard-page-area .pagination').html(sPage);
     
-    $('#hostcard-info-area, #hostcard-op-area').addClass('d-none');
+    $('#no-hostcard-area, #hostcard-info-area, #hostcard-op-area').addClass('d-none');
   }
   
   function pageOfIndex(i, currIdx) {
@@ -1707,7 +1545,7 @@ function updateWebsitePage(newPageIdx) {
 }
 
 function tryRenewWebList(resetPage) {
-  NAL.call('list_website',[NAL.swHost(),NAL.swMagic()]).then( res => {
+  NAL.call('list_website',[NAL.swMagic()]).then( res => {
     if (res instanceof Array) {
       recent_websites = res;
       updateWebsitePage(resetPage?0:null);
@@ -1796,7 +1634,7 @@ function updateSignListPage(newPageIdx) {
 }
 
 function tryRenewSignList(resetPage) {
-  NAL.call('list_signature',[NAL.swHost(),NAL.swMagic()]).then( res => {
+  NAL.call('list_signature',[NAL.swMagic()]).then( res => {
     if (res instanceof Array) {
       recent_signlist = res;
       updateSignListPage(resetPage?0:null);
@@ -1805,13 +1643,17 @@ function tryRenewSignList(resetPage) {
 }
 
 $( () => {
+  $('#btn-refresh-hostcard').on('click', ev => {
+    jumpHostcardPage(0,true);
+  });
+  
   $('#hostcard-table-area').on('click', ev => {
     let itemNode = $(ev.target).parents('.list-group-item');
     if (itemNode.length == 0) return;
     let host = itemNode.data('name');
     if (!host) return;
     
-    NAL.call_('list_cards',[NAL.swHost(),NAL.swMagic(),true,null,host]).then( res => {
+    NAL.call_('list_cards',[NAL.swMagic(),true,null,host]).then( res => {
       if (!(res instanceof Array)) return;
       
       let sHtml = '';
@@ -1893,7 +1735,7 @@ $( () => {
     if (!cardChild || !cardContent) return; // unexpected error
     
     if (isRmv) {
-      NAL.call_('remove_card',[NAL.swHost(),NAL.swMagic(),cardHost,cardFlag,cardRole,cardChild]).then( res => {
+      NAL.call_('remove_card',[NAL.swMagic(),cardHost,cardFlag,cardRole,cardChild]).then( res => {
         if (res === 'OK') {
           cardNode.remove();
           alert('成功移除项目');
@@ -1971,7 +1813,7 @@ $( () => {
     let comefrom = $('#addcard-auth').val().trim();
     let children = child + '';
     if (flag == 'gncd') children += ',' + child2 + ',' + child3;
-    NAL.call_('save_card',[NAL.swHost(),NAL.swMagic(),flag,role,children,cardContent,comefrom,targHost]).then( res => {
+    NAL.call_('save_card',[NAL.swMagic(),flag,role,children,cardContent,comefrom,targHost]).then( res => {
       let cardDesc = flag == 'pspt'? '护照': (flag == 'visa'? '签证': '绿卡');
       if (res === 'OK') {
         $('#addcard-auth').val('');
@@ -1996,7 +1838,7 @@ $( () => {
     else showWebStrategy(name);
     
     function showWebStrategy(hostname) {
-      NAL.call('web_strategy',[NAL.swHost(),NAL.swMagic(),hostname]).then( res => {
+      NAL.call('web_strategy',[NAL.swMagic(),hostname]).then( res => {
         if (typeof res == 'string') {
           hideWebStrategy();
           return;
@@ -2047,7 +1889,7 @@ $( () => {
     showSignListItem(parseInt(name));
     
     function showSignListItem(itemId) {
-      NAL.call('get_signed_item',[NAL.swHost(),NAL.swMagic(),itemId]).then( res => {
+      NAL.call('get_signed_item',[NAL.swMagic(),itemId]).then( res => {
         if (!(res instanceof Array)) {
           hideSignListItem();
           return;

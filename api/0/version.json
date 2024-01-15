@@ -1,8 +1,0 @@
-{ "ver": "0.1",
-"base": "/account/api/",
-"files": [
-  ["last/bridge.html",7245],
-  ["0/nbc_base-0.1.min.js",628686],
-  ["vdf.wasm",337762],
-  ["sw-0.js",89941 ]
-]}
