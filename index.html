@@ -1119,7 +1119,7 @@ $( () => {
     let url = $('#input-realhost').val().trim();
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
-    wait__(fetch('https://' + url + '/cards/managers'),30000).then( res => {
+    wait__(fetch('https://' + url + '/rsp/managers'),30000).then( res => {
       if (res.status == 200)
         return res.json();
       else return null;
@@ -1144,7 +1144,7 @@ $( () => {
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
     tempDisableBtn(ev.target);
-    wait__(fetch(url+'/cards/disabling?id='+curr_real_id),30000).then( res => {
+    wait__(fetch(url+'/rsp/disabling?id='+curr_real_id),30000).then( res => {
       if (res.status == 200)
         return res.json();
       else if (res.status == 400)
@@ -1187,7 +1187,7 @@ $( () => {
         }
         // else, res is {time,account,signature}
         
-        wait__(fetch(url+'/cards/disabling',{method:'POST',body:JSON.stringify(res)}),
+        wait__(fetch(url+'/rsp/disabling',{method:'POST',body:JSON.stringify(res)}),
         30000).then( res2 => {
           if (res2.status == 200)
             return res2.json();

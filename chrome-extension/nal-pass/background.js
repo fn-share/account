@@ -154,7 +154,7 @@ const DEFAULT_REAL_MANAGER = { type:'',
   'rsp_admin_pubkey':'028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
   'csp_plt_pubkey':'03d72fa51f87d007a9c98e858bb057cb4e280ee1c8d97516af96ec1c9e13d63c36',
   'csp_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
-  'csp_selector': 'www.fn-share.com/crypto_host',
+  'csp_selector': 'www.fn-share.com/rsp/crypto_host',
 };
 
 function wrapCryptoBuf(msg) {
