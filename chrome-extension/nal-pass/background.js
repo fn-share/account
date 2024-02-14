@@ -1,5 +1,6 @@
 // background.js
 
+const NAL_WEBHOST = 'fn-share.github.io';
 const NAL_VERSION = 0.2;
 
 importScripts('/api/idb-v7.1.0/umd.js');
@@ -41,7 +42,7 @@ const bip66 = require('bip66');
 const REALM_SECRET = '';
 const secp256k_order = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
 
-function gen_fix_key(phone, psw) {  // psw can be utf-8 string or Buffer instance
+const gen_fix_key = function(phone, psw) {  // psw can be utf-8 string or Buffer instance
   let msg = Buffer.from(REALM_SECRET+':'+phone+':');
   if (typeof psw == 'string')
     msg = Buffer.concat([msg,Buffer.from(psw)]);
@@ -128,7 +129,7 @@ async function runHeartbeat() {
   await chrome.storage.local.set({'last-heartbeat': (new Date()).getTime()});
 }
 
-async function startHeartbeat() {
+async function startHeartbeat() {  // runHeartbeat task to holding SW alive
   runHeartbeat().then(() => {
     _heartbeatTask = setInterval(runHeartbeat, 20000); // run every 20 seconds
   });
@@ -155,8 +156,6 @@ const DEFAULT_REAL_MANAGER = { type:'',
   'csp_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
   'csp_selector': 'www.fn-share.com/crypto_host',
 };
-
-const NAL_WEBHOST = 'fn-share.github.io';
 
 function wrapCryptoBuf(msg) {
   if (msg.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
@@ -314,29 +313,41 @@ const URL_SECRET = ((fixed_secret) => {
 })(generateRand(16));
 
 const _LOWER_CHAR = 'abcdefghijklmnopqrstuvwxyz';
-const _UPPER_CHAR = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const _NUMB_CHAR  = '0123456789';
 
-function genRsvdList(rsvd) {
+const _RSVD_SIZE  = 3;
+const _CHANGE_CHAR_NUM = 1;   // 1 or 2
+
+function _matchRsvdWord(rsvd, rsvd2) {
+  let n = rsvd2.length;
+  if (n == rsvd.length) {
+    let counter = 0;
+    for (let i=0; i < n; i++) {
+      if (rsvd2[i] !== rsvd[i])
+        counter += 1;
+    }
+    if (counter <= _CHANGE_CHAR_NUM)
+      return true;
+  }
+  return false;
+}
+
+function _genRsvdList(rsvd) {  // rsvd should be base36 format
   let s = rsvd.slice(0,5);
   if (s.length < 3) s = ('000' + s).slice(-3);
-  let inLen = s.length; // min 3 char, max 5 char
-  let tail = inLen == 3? '\x00\x00': (inLen == 4? '\x00': '');
+  let inLen = s.length;  // min 3 char, max 5 char
   
   let b = [];
   while (true) {
     let s2 = '';
     for (let i=0; i < inLen; i++) {
-      let ch = s[i], ch2 = 'z';
-      if (_LOWER_CHAR.indexOf(ch) >= 0)
-        ch2 = _LOWER_CHAR[Math.floor(Math.random()*26)];  // _LOWER_CHAR[0~25]
-      else if (_UPPER_CHAR.indexOf(ch) >= 0)
-        ch2 = _UPPER_CHAR[Math.floor(Math.random()*26)];  // _UPPER_CHAR[0~25]
-      else if (_NUMB_CHAR.indexOf(ch) >= 0)
-        ch2 = _NUMB_CHAR[Math.floor(Math.random()*10)];   // _NUMB_CHAR[0~9]
+      let ch2;
+      if (_NUMB_CHAR.indexOf(s[i]) >= 0)
+        ch2 = _NUMB_CHAR[Math.floor(Math.random()*10)];  // _NUMB_CHAR[0~9]
+      else ch2 = _LOWER_CHAR[Math.floor(Math.random()*26)];  // _LOWER_CHAR[0~25]
       s2 += ch2;
     }
-    s2 += tail;
+    if (s == s2 || _matchRsvdWord(s,s2)) continue;
     
     if (b.indexOf(s2) < 0) {
       b.push(s2);
@@ -345,16 +356,39 @@ function genRsvdList(rsvd) {
   }
   
   let idx = Math.floor(Math.random()*9);
-  b[idx] = s + tail;
-  return [idx,Buffer.from(b.join(''))];
-}
-
-function getAccountRsvd(accInfo) {
-  let tmp = accInfo.rsvd_index * 10;
-  tmp = Buffer.from(accInfo.rsvd_list.slice(tmp,tmp+10),'hex');
-  if (tmp[4] == 0)
-    tmp = tmp[3] == 0? tmp.slice(0,3): tmp.slice(0,4);
-  return tmp.toString('utf-8');
+  b[idx] = genMatched(s);
+  return b;
+  
+  function genMatched(targ) {
+    let n = targ.length, changed = [];
+    for (let i=0; i < _CHANGE_CHAR_NUM; i++) {
+      let idx = Math.floor(Math.random()*n);  // 0 ~ n-1
+      while (changed.indexOf(idx) >= 0) {
+        idx = (idx + 1) % n;
+      }
+      changed.push(idx);
+    }
+    
+    let ret = '';
+    for (let i=0; i < n; i++) {
+      if (changed.indexOf(i)< 0)
+        ret += targ[i];
+      else {
+        let i1, i2, ch2;
+        if ((i1=_NUMB_CHAR.indexOf(s[i])) >= 0) {
+          i2 = Math.floor(Math.random()*10);  // _NUMB_CHAR[0~9]
+          ch2 = (i1 === i2? _NUMB_CHAR[(i2+1)%10] : _NUMB_CHAR[i2]);
+        }
+        else {
+          i1 = _LOWER_CHAR.indexOf(s[i]);
+          i2 = Math.floor(Math.random()*26);
+          ch2 = (i1 === i2? _LOWER_CHAR[(i2+1)%26] : _LOWER_CHAR[i2]);
+        }
+        ret += ch2;
+      }
+    }
+    return ret;
+  }
 }
 
 function configCheckBip(psw, accInfo) {
@@ -362,7 +396,7 @@ function configCheckBip(psw, accInfo) {
     let fixKey = gen_fix_key(accInfo.phone,psw);
     let secret = decryptMsg(enhanceFixKey(fixKey),accInfo.hosting_data);
     let fp = parseInt(accInfo.figerprint.slice(0,8),16);
-    rootBip.config(Buffer.from(secret.toString(CryptoJS.enc.Hex),'hex'),accInfo,fp);
+    rootBip.config(Buffer.from(secret.toString(CryptoJS.enc.Hex),'hex'),accInfo,fp,psw);
     
     let bipInfo = rootBip.info();
     if (bipInfo.psw_pubkey && bipInfo.psw_pubkey.slice(0,4) === accInfo.psw_pubkey_head)
@@ -684,9 +718,16 @@ async function findGreenCard(db, host, pubkey) {
   return null;
 }
 
+function _getRsvdCode(phone, psw) {
+  let rsvdSour = Buffer.from('LOGIN:'+phone+':'+psw);
+  let ha = CreateHash('sha256').update(rsvdSour).digest();
+  ha = CreateHash('sha256').update(ha).digest();
+  return base36.encode(ha).slice(0 - _RSVD_SIZE);
+}
+
 function BipAccount() {
   // we hide some variables here, avoid leaking out by console.log()
-  let phone = null, figerprint = null;
+  let phone = null, figerprint = null, rsvdCode = '';
   let alternate_no = null, alternate_off = 0;
   let didRoot = null, pswRoot = null, secureRoot = null, realRoot = null;
   let did_realid = null;
@@ -712,8 +753,10 @@ function BipAccount() {
       selfsign = null;
     },
     
-    config(secret, accInfo, fp) {
+    config(secret, accInfo, fp, psw) {
       phone = accInfo.phone;
+      rsvdCode = _getRsvdCode(phone,psw);
+      
       alternate_off = accInfo.alternate_off;
       alternate_no = (accInfo.alternate_no + alternate_off) & 0x7fffffff;
       figerprint = fp;
@@ -729,6 +772,14 @@ function BipAccount() {
       
       pswRoot = bip32.fromPrivateKey(secret.slice(64,96),secret.slice(96,128));
       pswRoot = pswRoot.derive(0x80000000);   // forget original psw account
+    },
+    
+    matchRsvdWord(rsvd2) {
+      return _matchRsvdWord(rsvdCode,rsvd2);
+    },
+    
+    genRsvdList() {
+      return _genRsvdList(rsvdCode);
     },
     
     secureboxCipher(crc, fixKey, pltPubkey, pdtPubkey) {  // get:rootBip.secureboxCipher(), set:rootBip.secureboxCipher(crc,fixKey,pltPubkey,pdtPubkey)
@@ -1262,7 +1313,7 @@ _rpc_func = {
                 needPass = true;
               else if (checker == 'rsvd') {
                 let accInfo = await db.get('config','account');
-                if (!accInfo || getAccountRsvd(accInfo) !== rsvd) {
+                if (!accInfo || !rootBip.matchRsvdWord(rsvd)) {
                   ret = 'INVALID_RSVD';
                   rootBip.disableBip();
                 }
@@ -1822,29 +1873,59 @@ _rpc_func = {
   },
   
   async list_rsvd(request, sender) {
-    let ret = 'NOT_READY';
+    let ret = 'NOT_READY', tryDelay = false;
     let accInfo = await (await wallet_db).get('config','account');
     if (accInfo) {
-      ret = [];
-      for (let i=0; i < 9; i++) {
-        let tmp = i * 10;
-        tmp = Buffer.from(accInfo.rsvd_list.slice(tmp,tmp+10),'hex');
-        if (tmp[4] == 0)
-          tmp = tmp[3] == 0? tmp.slice(0,3): tmp.slice(0,4);
-        ret.push(tmp.toString('utf-8'));
+      if (!rootBip.hasInit()) {
+        let psw = request.param[0];
+        if (typeof psw == 'string' && psw) {
+          bipInfo = configCheckBip(psw,accInfo);
+          if (bipInfo === null) {  // bipInfo is null if psw mismatch
+            ret = 'NEED_PASS';
+            tryDelay = true;
+          }
+          else ret = rootBip.genRsvdList();
+        }
+        else ret = 'WAIT_PASS';
       }
+      else ret = rootBip.genRsvdList();
     }
-    return {result:ret};
+    
+    ret = {result:ret};
+    if (tryDelay)
+      return await _waitReturn(ret,2000);
+    else return ret;
   },
   
   async check_rsvd(request, sender) {
     let ret = true, rsvd = request.param[0];
     let accInfo = await (await wallet_db).get('config','account');
-    if (!accInfo || getAccountRsvd(accInfo) !== rsvd) {
+    if (!rootBip.hasInit())
+      ret = 'WAIT_PASS';
+    else if (!accInfo || !rootBip.matchRsvdWord(rsvd)) {
       ret = false;
       rootBip.disableBip();
     }
     return {result:ret};
+  },
+  
+  async get_rsvd(request, sender) {
+    let ret, tryDelay = false, psw = request.param[0];
+    
+    let accInfo = await (await wallet_db).get('config','account');
+    if (accInfo) {
+      if (psw && !verifyAccoutPass(psw,accInfo)) { // psw mismatch
+        ret = 'NEED_PASS';
+        tryDelay = true;
+      }
+      else ret = _getRsvdCode(accInfo.phone,psw);
+    }
+    else ret = 'NOT_READY';
+    
+    ret = {result:ret};
+    if (tryDelay)
+      return await _waitReturn(ret,2000);
+    else return ret;
   },
   
   async save_strategy(request, sender) {
@@ -1878,6 +1959,10 @@ _rpc_func = {
   },
   
   async save_account(request, sender) {
+    let host = _getHost(sender);
+    if (host !== NAL_WEBHOST)
+      return {result:'INVALID_WEB_HOST'};
+    
     let now = _getSecondTm();
     let db = await wallet_db;
     let ver_info = await db.get('config','ver_info');
@@ -1885,10 +1970,6 @@ _rpc_func = {
       ver_info = {ver:NAL_VERSION,install_time:now,name:'ver_info'};
     
     let psw = request.param[0], accInfo = request.param[1];
-    let info = genRsvdList(accInfo.phone.slice(-4));
-    accInfo.rsvd_index = info[0];
-    accInfo.rsvd_list  = info[1].toString('hex');
-    
     let secret = Buffer.from(accInfo.hosting_data,'hex');
     let fixKey = gen_fix_key(accInfo.phone,psw);
     let secret2 = encryptMsg(enhanceFixKey(fixKey),secret);
@@ -1899,7 +1980,7 @@ _rpc_func = {
     accInfo.selfsign_no = Math.floor(Math.random() * 0x7fffffff) + 1; // not 0
     
     let fp = parseInt(accInfo.figerprint.slice(0,8),16);
-    rootBip.config(secret,accInfo,fp);
+    rootBip.config(secret,accInfo,fp,psw);
     let bipInfo = rootBip.info();
     accInfo.psw_pubkey_head = bipInfo.psw_pubkey.slice(0,4);
     
@@ -2144,8 +2225,8 @@ _rpc_func = {
         cfg = null;
     }
     
-    let ret = 'NONE', oldPsw = request.param[1], newPsw = request.param[2], rsvd = request.param[3];
-    if (cfg && typeof oldPsw == 'string' && typeof newPsw == 'string' && typeof rsvd == 'string' && rsvd.length >= 3 && rsvd.length <= 5) {
+    let ret = 'NONE', oldPsw = request.param[1], newPsw = request.param[2];
+    if (cfg && typeof oldPsw == 'string' && typeof newPsw == 'string') {
       let accInfo = await db.get('config','account');
       if (accInfo) {
         let fixKey = gen_fix_key(accInfo.phone,oldPsw);
@@ -2166,18 +2247,16 @@ _rpc_func = {
         if (!passed)
           ret = 'WAIT_PASS';
         else {
-          fixKey = gen_fix_key(accInfo.phone,newPsw || oldPsw);
+          if (!newPsw) newPsw = oldPsw;
+          
+          fixKey = gen_fix_key(accInfo.phone,newPsw);
           let secret2 = encryptMsg(enhanceFixKey(fixKey),secret);
           accInfo.hosting_data = secret2.toString(CryptoJS.enc.Base64);
-          
-          let info = genRsvdList(rsvd);
-          accInfo.rsvd_index = info[0];
-          accInfo.rsvd_list  = info[1].toString('hex');
           await db.put('config',accInfo);
           
           let fp = parseInt(accInfo.figerprint.slice(0,8),16);
           rootBip.disableBip();
-          rootBip.config(secret,accInfo,fp);
+          rootBip.config(secret,accInfo,fp,newPsw);
           ret = 'OK';
         }
       }
@@ -2213,7 +2292,6 @@ _rpc_func = {
       let accInfo = await db.get('config','account');
       if (accInfo) {
         bipInfo.phone = accInfo.phone;
-        bipInfo.alternate_off = accInfo.alternate_off;
         bipInfo.real_sp = accInfo.real_sp || DEFAULT_REAL_SERVER;
       }
       ret = bipInfo;

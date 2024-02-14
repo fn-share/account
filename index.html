@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Digital account tool for FNS">
 <meta name="author" content="Federation Knowledge Sharing Research Group">
-<title>Federation Knowledge Account</title>
+<title>NBC DID Account</title>
 <link rel="icon" href="favicon.ico">
 <link href="css/bootstrap.min.css" rel="stylesheet">
 </head>
@@ -46,14 +46,6 @@
   cursor: default;
 }
 </style>
-
-<div class="toast fade" role="alert" id="msg-toast" style="position:fixed; left:calc(50vw - 175px); top:10px; background-color:rgba(255,255,255,0.96); z-index:1055">
-  <div class="toast-header">
-    <strong class="me-auto">提示</strong>
-    <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
-  </div>
-  <div class="toast-body"></div>
-</div>
 
 <div class="modal" tabindex="-1" id="addcard-modal">
   <div class="modal-dialog">
@@ -99,8 +91,8 @@
 <!-- top block: about -->
 <div class="container-lg" name="block-about"><div class="row g-3 mt-2 pt-2 pb-2">
 
-<h2>关于 FNS 账号</h2>
-<div class="m-2">FNS 账号管理器是适用于联邦知识分享（Federation kNowledge Sharing, FNS）领域的个人账号管理工具，它基于 NBC 账号库（NBC Account Library，NAL）构建，是一套支持 DID 自主身份的账号系统。</div>
+<h2>关于 NBC DID 账号</h2>
+<div class="m-2">NBC DID 账号管理器是适用于联邦知识分享（Federation kNowledge Sharing, FNS）领域的个人账号管理工具，它基于 NBC 账号库（NBC Account Library，NAL）构建，是一套支持 DID 自主身份的账号系统。</div>
 <div class="m-2">请注意，本软件目前只支持在桌面电脑的 chrome 浏览器中使用。</div>
 <div class="m-2" id="wait-auth-list"></div>
 </div></div>
@@ -110,7 +102,8 @@
 
 <div class="container-fluid d-none" name="hosting-pre-restore">
   <h2 class="mt-2">在本机创建账号</h2>
-  <p class="mt-4">手机号与助记语一起用于推导账号，其中手机号末尾 4 个数字用作缺省的保留字（以后可改）。助词语（即，脑词）是您最难忘，别人又难猜的一句话，请妥善保管助记语，它属于关键机密，恢复账号会用到。</p>
+  <p class="mt-4">手机号与助记语一起用于推导账号。助词语（即，脑词）是您最难忘，别人又难猜的一句话，请妥善保管助记语，它属于关键机密，恢复账号会用到。</p>
+  <p class="mb-2">登录密码最小长度是 6 个字符，建议超过 8 个字符。</p>
   <div class="row mt-3">
     <form class="col-auto" onsubmit="return false" style="width:300px">
       <input class="form-control mt-3 shadow-none" type="text" autocomplete="username" placeholder="输入手机号" id="login-usr">
@@ -144,10 +137,6 @@
 <div class="tab-pane fade show active" id="list-abstract" role="tabpanel">
 <h2 class="mb-4">当前账号</h2>
 <div class="alert alert-primary mb-2 text-break" role="alert">
-<!-- <span id="acc-alter">小号序号：</span><br>
-  <span id="dev-fp">设备指纹：</span><br>
-  <span id="did-fp">根身指纹：</span><br>
-  <span id="did-pub">根身账号：</span><br><br>  -->
   <span id="real-fp">真身指纹：</span><br>
   <span id="did-real">真身标识：</span><br>
   <span id="real-pub">真身账号：</span>
@@ -161,26 +150,28 @@
 
 <div class="tab-pane fade" id="list-psw" role="tabpanel">
 <h2 class="mb-4">验证保留字</h2>
-<p>点击下面按钮系统将发起保留字验证，如果选错保留字，系统将立即上锁，您需刷新网页并输密码来解锁。提示：借助选错保留字，您可以让系统临时上锁。</p>
+<p class="mb-2">请从弹出的列表中选择一个校验码，正确选择是取保留字校验码中有 1 个字符变换过的那一项，列表中其它项目均变换过 2 个以上字符。</p>
+<p class="mb-2">点击下面按钮系统将发起保留字验证，如果选错项目，系统将立即上锁，此后用户需输入正确的登录密码才能解锁。提示：您可以借助故意选错校验码给系统上锁。</p>
 <div class="mt-4 mb-4"><button type="button" class="btn btn-primary" id="btn-verify-rsvd">验证保留字</button></div>
 
-<h2 class="mt-5 mb-4">修改账号</h2>
+<h2 class="mt-5 mb-4">查询保留字校验码</h2>
+<p>保留字校验码从用户预设的手机号与登录密码推导而来，该校验码在验证保留字时会用到。</p>
+<div class="mt-4 mb-4"><button type="button" class="btn btn-primary" id="btn-query-rsvd">查询验证码</button></div>
+
+<h2 class="mt-5 mb-4">修改登录密码</h2>
+<p>修改登录密码后，保留字校验码也会跟随变化。</p>
 <form onsubmit="return false">
 <div class="input-group mb-3" style="width:300px">
   <span class="input-group-text">当前密码</span>
-  <input type="password" class="form-control" placeholder="输入密码用于操作授权" autocomplete="off" id="input-mod-psw">
+  <input type="password" class="form-control" placeholder="输入密码用于授权" autocomplete="off" id="input-mod-psw">
 </div>
 <div class="input-group mb-3" style="width:300px">
   <span class="input-group-text">新设密码</span>
-  <input type="password" class="form-control" placeholder="缺省空值表示不改密码" autocomplete="off" id="input-mod-psw2">
+  <input type="password" class="form-control" placeholder="输入新密码" autocomplete="off" id="input-mod-psw2">
 </div>
 <div class="input-group mb-3" style="width:300px">
   <span class="input-group-text">再输密码</span>
-  <input type="password" class="form-control" placeholder="请再次输入新设密码" autocomplete="off" id="input-mod-psw3">
-</div>
-<div class="input-group mb-3" style="width:300px">
-  <span class="input-group-text">新保留字</span>
-  <input type="text" class="form-control" placeholder="3~5 个数字或英文字母" autocomplete="off" id="input-mod-rsvd">
+  <input type="password" class="form-control" placeholder="再次输入新密码" autocomplete="off" id="input-mod-psw3">
 </div>
 </form>
 <div class="mt-4 mb-2"><button type="button" class="btn btn-primary" id="btn-modi-acc">提交更改</button> &nbsp; <button type="button" class="btn btn-primary d-none" id="btn-rollback-acc">回退</button> &nbsp; <button type="button" class="btn btn-primary d-none" id="btn-renew-real">再次同步</button></div>
@@ -189,9 +180,10 @@
 
 <div class="tab-pane fade" id="list-real" role="tabpanel">
 <h2 class="mb-4">关于真身验证</h2>
-<p class="mb-2">真身验证（Real Person Verification）是第三方网站提供真人验证服务，<strong>用于确保被服务对象是真实人类</strong>。NBC DID 要求真身验证至少要采用手机短信的验证方式，验证通过后第三方网站在它布署的真身服务点（Real Server Point），为用户提供诸如护照颁发、护照验真等服务。</p>
-<p class="mb-2">您应该在下面 “设置真身服务点” 指定服务点 URL 并完成真身验证，以便获得可信护照服务，登录应用网站需要可信护照。否则，你只能自行颁发自签护照，自签护照不是可信护照，只适用于少数网站。</p>
-<p class="mb-2">真身服务点完成真身验证后，将记录您的手机号与可公开真身账号，然后生成关联凭证。</p>
+<p class="mb-2">真身（Real Person）验证是 NBC DID 系统的必备环节，<strong>它用于确保被服务的对象是真实人类</strong>。NBC DID 真身验证要求至少采用手机短信实施验证（验证时还可选与特定的可信设备捆绑）。验证通过后，该社区的诸多第三方网站都使用同一个真身服务点（Real Server Point，RSP）获取类似于 <strong>护照颁发、护照验真、换绑手机号</strong> 等服务。</p>
+<p class="mb-2">您应该在下面 “设置真身服务点” 指定服务点 URL 并完成真身验证，然后才能获得应用于诸多应用网站登录所需的<strong>可信护照服务</strong>。否则，你只能自行颁发自签护照（自签护照不是可信护照），只适用于少数网站。</p>
+<p class="mb-2">更换真身服务点，相当于更换社区，每个社区只置设一个真身服务点。</p>
+<p class="mb-2">提示：真身服务点（RSP）实施真身验证时，会记录您的手机号与可公开真身账号之间的关联关系。</p>
 
 <h2 class="mt-5 mb-4">设置真身服务点</h2>
 <div class="alert alert-primary mb-3 text-break" role="alert">
@@ -203,7 +195,7 @@
   <span class="input-group-text">https://</span>
   <input type="text" class="form-control text-truncate" autocomplete="off" id="input-realhost">
 </div>
-<div class="mb-3">
+<div class="mb-4">
   <button type="button" class="btn btn-primary" id="btn-set-realhost">保存 URL</button>
   <button type="button" class="btn btn-success ms-2" id="btn-real-state">查询状态</button>
   <button type="button" class="btn btn-success ms-1" id="btn-stop-pspt">停用服务</button>
@@ -225,14 +217,14 @@
 <h2 class="mt-5 mb-4">更换自签护照</h2>
 <div class="input-group mb-3" style="width:340px">
   <span class="input-group-text">序号</span>
-  <input type="text" class="form-control text-truncate shadow-none" autocomplete="off" placeholder="如果不指定将由系统随机生成" id="input-selfsign-no">
+  <input type="text" class="form-control text-truncate shadow-none" autocomplete="off" placeholder="若不指定将随机生成" id="input-selfsign-no">
 </div>
 <div class="mb-3">
   <button type="button" class="btn btn-primary" id="btn-set-selfsign">立即更换</button>
 </div>
 
 <h2 class="mt-5 mb-4">设置昵称与头像</h2>
-<p class="mb-3">为游客身份设置昵称与头像，建议您不在本页设置真实姓名与真实身份照片。</p>
+<p class="mb-3">为游客身份设置昵称与头像，建议不要设置真实姓名与真实照片。</p>
 <div class="input-group mb-3" style="width:340px">
   <span class="input-group-text">使用昵称</span>
   <input type="text" class="form-control text-truncate shadow-none" autocomplete="off" id="input-selfsign-nick">
@@ -560,7 +552,7 @@ return ( (name, args) => {
       
       node = rsvdDialog.querySelector('div[name="rsvd-body"]');
       let btn = document.createElement('button');
-      btn.setAttribute('style','border:1px solid transparent; margin:0.25rem 0.5rem; padding:0.5rem 0.75rem; color:#fff; background-color:#198754; border-color:#198754; border-radius:1.5rem;');
+      btn.setAttribute('style','border:1px solid transparent; margin:0.25rem 0.5rem; padding:0.5rem 0.75rem; font-weight:500; color:#fff; background-color:#198754; border-color:#198754; border-radius:1.5rem;');
       
       let i = 0, btn2 = btn;
       while (true) {
@@ -656,20 +648,6 @@ function htmlEscape(text) {
     else if (match == '"')
       return '&quot;';
   });
-}
-
-function parseUrlArg(arg) {
-  var d = {}, b = arg.split('&');
-  for (var i=0,s; s=b[i]; i++) {
-    var b2 = s.split('=');
-    var sName = b2[0];
-    
-    b2.splice(0,1);
-    if (b2.length == 0)
-      d[sName] = '';
-    else d[sName] = decodeURIComponent(b2.join('='));
-  }
-  return d;
 }
 
 async function wait__(promise_obj, wait) {
@@ -882,10 +860,6 @@ function showHostingTask(task) {
     // step 1: show account info
     _currAlterOff = info.alternate_off || 0;
     
-    // $('#acc-alter').text('小号序号：' + info.alternate_off);
-    // $('#dev-fp').text('设备指纹：' + info.figerprint);  // DEV-ACC
-    // $('#did-fp').text('根身指纹：' + info.did_figerprint); // ALT-ACC
-    // $('#did-pub').text('根身账号：' + info.did_pubkey);    // ALT-ACC
     $('#did-real').text('真身标识：' + info.did_realid);   // alt/0/0
     $('#real-fp').text('真身指纹：' + info.real_figerprint);
     $('#real-pub').text('真身账号：' + info.real_pubkey);
@@ -952,61 +926,39 @@ function createAccount(targBtn) {
   if (psw.length < 6)
     return alert('密码格式错误：密码长度要求超过 6');
   
-  alt_off = parseInt(parseUrlArg(location.search.slice(1)).alt || '0') & 0xff;
-  
   let loadingEle = $(targBtn).find('span.spinner-border');
   loadingEle.removeClass('d-none');  // show busy
   
-  // step 2: create DEV-ACC
+  // step 2: create DEV-ACC, PSW-ACC
   let ha = CreateHash('sha256').update(mnemonic).digest();
   let devBip = bip32.fromSeed(Buffer.concat([Buffer.from(phoneNo+':'),ha]));
+  devBip.chainCode = Buffer.alloc(32,0); // set ZERO to keep same to TEE's implementation 
   
   // step 3: create ALT-ACC
   let ha2 = CreateHash('sha256').update(Buffer.from('DID_CHILD:'));
   ha2 = ha2.update(devBip.privateKey.slice(0,16)).digest().slice(0,4);
-  let alternate_no = parseInt(ha2.toString('hex'),16) + alt_off;
+  let alternate_no = parseInt(ha2.toString('hex'),16);     // alt_offset16 = 0
   alternate_no = 0x80000000 + (alternate_no & 0x7fffffff); // can not use `no | 0x80000000`
+  
   let altBip = devBip.derive(alternate_no);
   let altHa = Buffer.concat([Buffer.from('NBC_DID:'+phoneNo+':'),altBip.publicKey]);
   altHa = CreateHash('sha256').update(CreateHash('sha256').update(altHa).digest()).digest();
   
-  // step 4: create PSW-ACC, by: dev_priv + intensive[:32]
-  let devPsw = Buffer.concat([devBip.publicKey,Buffer.from(psw)]);
-  ha = CreateHash('sha256').update(devPsw).digest();
-  let intensive = CreateHash('sha512').update(ha).digest();  // 64 bytes, it is simple intensive algorithm
-  
-  let n = BigInt('0x' + devBip.privateKey.toString('hex'));
-  n = (n + BigInt('0x' + intensive.slice(32,64).toString('hex'))) % secp256k_order;
-  if (n === 0n) {  // very seldom, but it would happen
-    loadingEle.addClass('d-none');
-    return alert('推导账号出错');
-  }
-  
-  n = n.toString(16);
-  if (n.length & 0x01) n = '0' + n;
-  n = Buffer.from(n,'hex');  // n is: (dev_priv + intensive[:32]) % secp256k_order
-  let pswPriv = Buffer.alloc(32,0);
-  n.copy(pswPriv,32 - n.length,0);  // copy(targBuffer,targStart,sourStart,sourEnd)
-  
-  let halfChain1 = devBip.chainCode.slice(16,32);
-  let halfChain2 = CreateHash('sha256').update(Buffer.from(phoneNo)).update(intensive.slice(32,64)).digest().slice(0,16);
-  let pswBip = bip32.fromPrivateKey(pswPriv,Buffer.concat([halfChain1,halfChain2]));
-  pswBip = pswBip.derive(0x80000000);
-  
-  // step 5: forget mnemonic, password and devBip account
+  // step 4: forget mnemonic, password and devBip account
   let figerprint = ripemdHash(devBip.publicKey).slice(0,6);
   $('#mnemonic-word').val('');
   $('#login-psw').val('');
   $('#login-psw2').val('');
   mnemonic = devBip = null; // just for safety
   
-  // step 6: save account to SW
+  let pswBip = bip32.fromSeed(generateRand(32));
   let hosting = altBip.privateKey.toString('hex') + altHa.toString('hex');
   hosting += pswBip.privateKey.toString('hex') + pswBip.chainCode.toString('hex');
   
+  // step 6: save account to SW
   let accInfo = { phone: phoneNo,
     alternate_no: alternate_no & 0x7fffffff,
-    alternate_off: alt_off,
+    alternate_off: 0,
     figerprint: figerprint.toString('hex'),  // DEV-ACC
     hosting_data: hosting,
   };  // will add more: rsvd_list, rsvd_index, name, psw_pubkey_head, regist_time
@@ -1082,11 +1034,20 @@ function shuffle(arr) {
 
 $( () => {
   $('#btn-verify-rsvd').on('click', ev => {
-    NAL.call('list_rsvd').then( rsvdList => {
-      if (!(rsvdList instanceof Array) || !rsvdList.length)
+    NAL.call('list_rsvd').then(afterGetList);
+    
+    function afterGetList(rsvdList) {
+      if (typeof rsvdList == 'string') {
+        if (rsvdList == 'WAIT_PASS' || rsvdList == 'NEED_PASS') {
+          NAL.dialog('pass', psw => {
+            NAL.call('list_rsvd',[psw]).then(afterGetList);
+          }).catch(e => null);
+        }
+      }
+      else if (!(rsvdList instanceof Array) || !rsvdList.length)
         alert('获取保留字列表出错');
       else showAndVeriRsvd(rsvdList);
-    });
+    }
     
     function showAndVeriRsvd(rsvdList) {
       shuffle(rsvdList); // rsvdList must be an Array
@@ -1098,6 +1059,21 @@ $( () => {
     }
   });
   
+  $('#btn-query-rsvd').on('click', ev => {
+    NAL.dialog('pass').then( psw => {
+      NAL.call('get_rsvd',[psw]).then( res => {
+        if (typeof res == 'string') {
+          if (res == 'NEED_PASS')
+            alert('操作失败：密码不正确');
+          else if (res == 'NOT_READY')
+            alert('操作失败：账号未就绪');
+          else if (res.length <= 5)
+            alert('保留字的校验码为：'+res);
+        }
+      });
+    }).catch(e => null);
+  });
+  
   $('#btn-modi-acc').on('click', ev => {
     // step 1: check inputs
     let newPsw = $('#input-mod-psw2').val();
@@ -1107,18 +1083,14 @@ $( () => {
     
     let currPsw = $('#input-mod-psw').val();
     if (currPsw.length < 6)
-      return alert('当前密码长度不足，要求超过 6 个字母');
-    if (newPsw.length > 0 && newPsw.length < 6)
-      return alert('新设密码长度不足，要求超过 6 个字母');
-    
-    let rsvdWord = $('#input-mod-rsvd').val().trim();
-    if (!rsvdWord.match(/^[a-zA-Z0-9]{3,5}$/))
-      return alert('保留字应由 3~5 个数字或英文字母构成');
+      return alert('当前密码长度不足，要求超过 6 个字符');
+    if (newPsw.length < 6)
+      return alert('新设密码长度不足，要求超过 6 个字符，建议取 8 个以上字符');
     
     tempDisableBtn(ev.target);
     
     // step 2: change psw and rsvd
-    NAL.call_('set_acc_psw',[NAL.swMagic(),currPsw,newPsw,rsvdWord]).then( res => {
+    NAL.call_('set_acc_psw',[NAL.swMagic(),currPsw,newPsw]).then( res => {
       if (res === 'WAIT_PASS')
         alert('操作失败：密码不正确');
       else if (res == 'OK') {
@@ -1126,7 +1098,6 @@ $( () => {
         $('#input-mod-psw').val('');
         $('#input-mod-psw2').val('');
         $('#input-mod-psw3').val('');
-        $('#input-mod-rsvd').val('');
       }
       else alert('操作失败：' + res);
     });
@@ -1148,7 +1119,7 @@ $( () => {
     let url = $('#input-realhost').val().trim();
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
-    wait__(fetch('https://' + url + '/cards/managers'),30000).then(res => {
+    wait__(fetch('https://' + url + '/cards/managers'),30000).then( res => {
       if (res.status == 200)
         return res.json();
       else return null;
@@ -1375,10 +1346,6 @@ $( () => {
 </script>
 
 <script>
-// var msgToast = new bootstrap.Toast($('#msg-toast'),{autohide:true,delay:3000});
-// $('#msg-toast .toast-body').html('some message');
-// msgToast.show();
-
 //---- list cards
 
 var curr_hostcard = [];
