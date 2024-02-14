@@ -1232,7 +1232,7 @@ $( () => {
     
     url = 'https://' + url;
     if (url.slice(-1) == '/') url = url.slice(0,-1);
-    url += '/users/regist?phone=' + $('#my-real-phone').text();
+    url += '/rsp/regist_user?phone=' + $('#my-real-phone').text();
     url += '&pubkey=' + $('#my-real-pub').text();
     url += '&chain=' + $('#my-real-chain').text();
     

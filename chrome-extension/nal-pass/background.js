@@ -977,7 +977,7 @@ function BipAccount() {
       return this._newPassport(false,realm,tmSegment,selfsign_no,selfsign,now_tm,expiredTm,adminFP);
     },
     
-    async genGreencardCipher(adminPub, expireMins, visaCard, suggestChild, realHost) { // suggestChild is null or string
+    async genGreencardCipher(adminPub, expireMins, visaCard, suggestChild) { // suggestChild is null or string
       let child1 = parseInt(visaCard.child) & 0x7fffffff;
       let child2 = Math.floor(Math.random()*0x7fffffff) + 1;
       let child3 = Math.floor(Math.random()*0x7fffffff) + 1; 
@@ -1040,25 +1040,6 @@ function BipAccount() {
       cipherBuf = encryptMsg(r_pdt[2],cipherBuf);
       
       info = [now_tm,expireMins,child1,child2,child3,targAcc.publicKey,rootcode,tmpPub+cipherBuf.toString()];
-      
-      if (realHost) {  // need report to RSP
-        let reportPath = Buffer.alloc(12,0);
-        reportPath.writeUInt32BE(child1,0);
-        reportPath.writeUInt32BE(child2,4);
-        reportPath.writeUInt32BE(child3,8);
-        let body = {rid:did_realid,path:reportPath.toString('hex'),rootcode:rootcode.toString('hex')};
-        
-        let url = 'https://' + realHost + '/cards/report';
-        return await wait__( fetch(url,{method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'}),10000).then( res => {
-          if (res.status == 200)
-            return res.json();
-          else return null;
-        }, e => null).then( res2 => {
-          if (res2 && res2.result == 'OK')
-            return info;
-          else return null;
-        });
-      }
       return info;
     },
     
@@ -1581,7 +1562,7 @@ _rpc_func = {
             pubkey:info[5].toString('hex') };
           let option = {method:'POST',body:JSON.stringify(body),referrerPolicy:'no-referrer'};
           
-          let realUrl = 'https://' + (accInfo.real_sp || DEFAULT_REAL_SERVER) + '/cards/pspt/' + info[6];
+          let realUrl = 'https://' + (accInfo.real_sp || DEFAULT_REAL_SERVER) + '/rsp/pspt/' + info[6];
           ret = await wait__(fetch(realUrl,option),30000).then( res => {
             if (res.status == 200)
               return res.json();
@@ -1694,8 +1675,7 @@ _rpc_func = {
           return {result:ret};
         }
         
-        let realHost = accInfo.real_sp || DEFAULT_REAL_SERVER; // not null, will report to RSP
-        let info = await rootBip.genGreencardCipher(adminPub,expireMins,card,suggestChild,realHost);
+        let info = await rootBip.genGreencardCipher(adminPub,expireMins,card,suggestChild);
         
         ret = 'NETWORK_ERROR';
         if (info) { // [now_tm,expireMins,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
