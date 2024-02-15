@@ -75,14 +75,10 @@ function enhanceFixKey(fixKey) {
 let _vdfInstance = null;
 let REAL_MANAGER = null;
 
-function setupRealManagers(info) {
-  let tmp = { type:info.type||''};
+function setupRealManager(info) {
+  let tmp = { type:info.type||'' };
   tmp.rsp_admin_pubkey = Buffer.from(info.rsp_admin_pubkey,'hex');
   tmp.rsp_admin_fp = ripemdHash(tmp.rsp_admin_pubkey).slice(0,4);
-  tmp.csp_plt_pubkey = Buffer.from(info.csp_plt_pubkey,'hex');
-  tmp.csp_plt_fp = ripemdHash(tmp.csp_plt_pubkey).slice(0,4);
-  tmp.csp_pdt_pubkey = Buffer.from(info.csp_pdt_pubkey,'hex');
-  tmp.csp_pdt_fp = ripemdHash(tmp.csp_pdt_pubkey).slice(0,4);
   tmp.csp_selector = 'https://' + info.csp_selector;
   return tmp;
 }
@@ -90,7 +86,7 @@ function setupRealManagers(info) {
 async function _tryInitVdf() {
   let accInfo = await (await wallet_db).get('config','account');
   if (accInfo?.real_manager)
-    REAL_MANAGER = setupRealManagers(accInfo.real_manager);
+    REAL_MANAGER = setupRealManager(accInfo.real_manager);
   
   console.log('start build VDF for SW ...');
   try {
@@ -149,11 +145,9 @@ startHeartbeat();
 
 const ZERO = Buffer.alloc(1,0);
 
-const DEFAULT_REAL_SERVER = 'real.fn-share.com';
+const DEFAULT_REAL_SERVER = 'www.fn-share.com';
 const DEFAULT_REAL_MANAGER = { type:'',
   'rsp_admin_pubkey':'028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
-  'csp_plt_pubkey':'03d72fa51f87d007a9c98e858bb057cb4e280ee1c8d97516af96ec1c9e13d63c36',
-  'csp_pdt_pubkey':'02ffef6766b43225e273a5da598037c1787b3b9c1043e99b27a780d06d0ae367bf',
   'csp_selector': 'www.fn-share.com/rsp/crypto_host',
 };
 
@@ -257,10 +251,10 @@ async function recycleDataStore() {
 
 function _renewCryptoHost(db, accInfo, now) {
   // default fetch timeout is indicated by the browser, chrome is 300s, firefox is 90s
-  fetch(REAL_MANAGER.csp_selector).then(res => res.text()).then( res2 => {
-    if (res2 && typeof res2 == 'string') {
-      accInfo.crypto_host = res2;
-      accInfo.crypto_host_tm = now;
+  fetch(REAL_MANAGER.csp_selector).then(res => res.json()).then( res2 => {
+    if (res2 instanceof Array && res2.length) {
+      accInfo.csp_list = res2;
+      accInfo.csp_list_tm = now;
       db.put('config',accInfo);
     }
   });
@@ -271,7 +265,7 @@ async function checkCryptoHost() {
   let accInfo = await db.get('config','account');
   if (accInfo) {
     let now = _getSecondTm();
-    if (!accInfo.crypto_host || now - (accInfo.crypto_host_tm||0) > 259200) // need renew, 259200 is 3 days
+    if (!accInfo.csp_list || now - (accInfo.csp_list_tm||0) > 259200) // need renew, 259200 is 3 days
       _renewCryptoHost(db,accInfo,now);  // no wait
   }
 }
@@ -977,7 +971,7 @@ function BipAccount() {
       return this._newPassport(false,realm,tmSegment,selfsign_no,selfsign,now_tm,expiredTm,adminFP);
     },
     
-    async genGreencardCipher(adminPub, expireMins, visaCard, suggestChild) { // suggestChild is null or string
+    async genGreencardCipher(adminPub, expireMins, visaCard, suggestChild, pltPub, devPub) { // suggestChild is null or string
       let child1 = parseInt(visaCard.child) & 0x7fffffff;
       let child2 = Math.floor(Math.random()*0x7fffffff) + 1;
       let child3 = Math.floor(Math.random()*0x7fffffff) + 1; 
@@ -1027,8 +1021,8 @@ function BipAccount() {
       // encrypt cipherBuf
       ECDH.generateKeys();
       let tmpKey = ECDH.getPrivateKey();
-      let r_plt = gen_ecdh_key(REAL_MANAGER.csp_plt_pubkey,false); // [flag,nonce,k_iv]
-      let r_pdt = gen_ecdh_key(REAL_MANAGER.csp_pdt_pubkey,false);
+      let r_plt = gen_ecdh_key(pltPub,false); // [flag,nonce,k_iv]
+      let r_pdt = gen_ecdh_key(devPub,false);
       ECDH.generateKeys();  // erase for safty
       
       tmpPub = (r_plt[0]?'03':'02') + r_plt[1].toString('hex');
@@ -1620,18 +1614,28 @@ _rpc_func = {
       
       adminPub = Buffer.from(adminPub,'hex');
       
-      let card = null, accInfo = null, cryptoHost = null;
+      let card = null, accInfo = null;
+      let cryptoHost = null, cryptoPlt = null, cryptoDev = null;
+      let now = _getSecondTm();
       if (adminPub.length == 33 && typeof expireMins == 'number') {
         card = await db.get('recent_cards',[host,'visa',role,child+'']);
         if (card) {
           accInfo = await db.get('config','account');
-          cryptoHost = accInfo?.crypto_host;
+          let cspList = accInfo?.csp_list;
+          if (cspList) {
+            cspList = cspList[0];  // hint: current only support fetch GNCD card from the first CSP node
+            cryptoHost = cspList[0]; cryptoPlt = cspList[1]; cryptoDev = cspList[2];
+          }
+          else {
+            if (accInfo)
+              _renewCryptoHost(db,accInfo,now);
+          }
         }
       }
       
       if (!card)
         ret = 'NO_CARD';
-      else if (!cryptoHost)
+      else if (!cryptoHost || !cryptoPlt || !cryptoDev)
         ret = 'NETWORK_ERROR';
       else {
         if (typeof reuseMins != 'number') {
@@ -1643,8 +1647,6 @@ _rpc_func = {
           }
           else reuseMins = 2880;  // 0 for no reuse, 2880 minutes is 2 days, can reuse expiring-2-days card 
         }
-        
-        let now = _getSecondTm();
         expireMins = Math.floor(now / 60) + expireMins;  // convert to till time
         
         let suggestCard = null;
@@ -1675,7 +1677,9 @@ _rpc_func = {
           return {result:ret};
         }
         
-        let info = await rootBip.genGreencardCipher(adminPub,expireMins,card,suggestChild);
+        cryptoPlt = Buffer.from(cryptoPlt,'hex');
+        cryptoDev = Buffer.from(cryptoDev,'hex');
+        let info = await rootBip.genGreencardCipher(adminPub,expireMins,card,suggestChild,cryptoPlt,cryptoDev);
         
         ret = 'NETWORK_ERROR';
         if (info) { // [now_tm,expireMins,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
@@ -1709,8 +1713,11 @@ _rpc_func = {
               }
               else ret = 'UNKNOWN_CARD';
             }
-            else if (typeof data == 'string')
-              ret = 'NETWORK_ERROR:' + data;
+            else if (typeof data == 'string') {
+              if (data == 'REQUEST_FAIL' || data == 'NETWORK_ERROR')
+                _renewCryptoHost(db,accInfo,now);
+              ret = data;
+            }
             // else, ret = 'NETWORK_ERROR';
             
             return ret;
@@ -1923,20 +1930,21 @@ _rpc_func = {
     else ret = 'INVALID_ARGS';
     return {result:ret};
   },
-  
+  /*
   async last_cryptohost(request, sender) {
     let db = await wallet_db;
     let accInfo = await db.get('config','account');
-    let crypto_host = accInfo?.crypto_host || '';
-    let forceRenew = request.param[0], expireTm = request.param[1] || 259200;  // 259200 is 3 days
-    let last_renew = accInfo.crypto_host_tm || 0;
+    let cspList = accInfo?.csp_list;
     
+    let forceRenew = request.param[0], expireTm = request.param[1] || 259200;  // 259200 is 3 days
+    let last_renew = accInfo.csp_list_tm || 0;
     let now = _getSecondTm();
-    if (forceRenew || !crypto_host || (now - last_renew) > expireTm) {
+    if (forceRenew || !cspList || (now - last_renew) > expireTm) {
       _renewCryptoHost(db,accInfo,now);   // no waiting
     }
-    return {result:{host:crypto_host,last_renew}};
-  },
+    
+    return {result:{host:(cspList?cspList[0][0]:''),last_renew}};
+  }, */
   
   async save_account(request, sender) {
     let host = _getHost(sender);
@@ -1966,7 +1974,7 @@ _rpc_func = {
     
     accInfo.real_manager = DEFAULT_REAL_MANAGER;
     await db.put('config',accInfo);
-    REAL_MANAGER = setupRealManagers(accInfo.real_manager);
+    REAL_MANAGER = setupRealManager(accInfo.real_manager);
     
     ver_info.acc_type = 'restorable';
     await db.put('config',ver_info);
@@ -2162,7 +2170,7 @@ _rpc_func = {
     return {result:ret};
   },
   
-  async set_real_managers(request, sender) {
+  async set_real_manager(request, sender) {
     let host = _getHost(sender);
     let magic = request.param[0];
     let db = await wallet_db;
@@ -2181,12 +2189,14 @@ _rpc_func = {
       
       let accInfo = await db.get('config','account');
       if (accInfo) {
-        let tmp = setupRealManagers(info);
+        let tmp = setupRealManager(info);
         
         accInfo.real_sp = url;
-        accInfo.real_managers = info;
+        accInfo.real_manager = info;
         await db.put('config',accInfo);
         REAL_MANAGER = tmp;
+        
+        _renewCryptoHost(db,accInfo,_getSecondTm());
         ret = 'OK';
       }
     }

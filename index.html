@@ -1119,13 +1119,13 @@ $( () => {
     let url = $('#input-realhost').val().trim();
     if (url.slice(-1) == '/') url = url.slice(0,-1);
     
-    wait__(fetch('https://' + url + '/rsp/managers'),30000).then( res => {
+    wait__(fetch('https://' + url + '/rsp/manager'),30000).then( res => {
       if (res.status == 200)
         return res.json();
       else return null;
     }, e => null).then( data => {
       if (data && data.rsp_admin_pubkey) {
-        NAL.call_('set_real_managers',[NAL.swMagic(),url,data]).then( res2 => {
+        NAL.call_('set_real_manager',[NAL.swMagic(),url,data]).then( res2 => {
           if (res2 === 'OK')
             alert('更改成功');
           else alert('操作失败');
