@@ -151,6 +151,18 @@ const DEFAULT_REAL_MANAGER = { type:'',
   'csp_selector': 'www.fn-share.com/rsp/crypto_host',
 };
 
+async function wait__(promise_obj, wait) {
+  let abort_fn = null;
+  let abortable_promise = Promise.race([ promise_obj,
+    new Promise( function(resolve, reject) {
+      abort_fn = function() { reject(new Error('TIMEOUT')) };
+    })
+  ]);
+  
+  setTimeout(()=>abort_fn(),wait);
+  return abortable_promise;
+}
+
 function wrapCryptoBuf(msg) {
   if (msg.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
     return msg;
@@ -251,7 +263,7 @@ async function recycleDataStore() {
 
 function _renewCryptoHost(db, accInfo, now) {
   // default fetch timeout is indicated by the browser, chrome is 300s, firefox is 90s
-  fetch(REAL_MANAGER.csp_selector).then(res => res.json()).then( res2 => {
+  wait__(fetch(REAL_MANAGER.csp_selector),15000).then(res => res.json()).then( res2 => {
     if (res2 instanceof Array && res2.length) {
       accInfo.csp_list = res2;
       accInfo.csp_list_tm = now;
@@ -667,18 +679,6 @@ function ber_encode(buf, off, tag, arg, fmt) {
   return off + len;
 }
 
-async function wait__(promise_obj, wait) {
-  let abort_fn = null;
-  let abortable_promise = Promise.race([ promise_obj,
-    new Promise( function(resolve, reject) {
-      abort_fn = function() { reject(new Error('TIMEOUT')) };
-    })
-  ]);
-  
-  setTimeout(()=>abort_fn(),wait);
-  return abortable_promise;
-}
-
 function gen_ecdh_key(pubkey33, re_gen) {
   if (re_gen) ECDH.generateKeys();
   
@@ -1020,7 +1020,7 @@ function BipAccount() {
       
       // encrypt cipherBuf
       ECDH.generateKeys();
-      let tmpKey = ECDH.getPrivateKey();
+      // let tmpKey = ECDH.getPrivateKey();
       let r_plt = gen_ecdh_key(pltPub,false); // [flag,nonce,k_iv]
       let r_pdt = gen_ecdh_key(devPub,false);
       ECDH.generateKeys();  // erase for safty
@@ -1154,20 +1154,20 @@ _rpc_func = {
   async add_card(request, sender) {
     // step 1: get host and card
     let host = _getHost(sender);
-    let comefrom = request.from || '';
-    let card = Buffer.from(request.card || '','hex');
+    let comefrom = request.param[0];
+    let card = Buffer.from(request.param[1] || '','hex');
     
     // step 2: check card
     let desc = '', flag = card.slice(12,16).toString('utf-8');
     if (flag != 'pspt' && flag != 'visa' && flag != 'gncd')
-      desc = "\u9a8c\u8bc1\u5931\u8d25\uff1a\u672a\u77e5\u5361\u8bc1\u683c\u5f0f"; // unknown card type
+      desc = 'INVALID_CARD';
     else {
       let crc = CreateHash('sha256').update(card.slice(0,-4)).digest().slice(0,4).toString('hex');
       if (crc != card.slice(-4).toString('hex'))
-        desc = "\u9a8c\u8bc1\u5931\u8d25\uff1a\u6821\u9a8c\u7801\u4e0d\u5339\u914d"; // verify code mismatch
+        desc = 'MISMATCH_CRC';
       else {
         if (!rootBip.hasInit())
-          desc = "NAL \u8d26\u53f7\u5c1a\u672a\u767b\u5f55\uff0c\u8bf7\u5148\u5728\u7f51\u9875\u5b8c\u6210\u767b\u5f55"; // should login at web page first
+          desc = 'INVALID_STATE';
       }
     }
     
@@ -1186,7 +1186,7 @@ _rpc_func = {
       
       let info = safeCheckCard(flag,children,host,card);
       if (typeof info == 'string')
-        desc = "\u9a8c\u8bc1\u5931\u8d25\uff1a" + info; // verify fail
+        desc = 'FAILED: ' + info
       else {
         // step 4: save card to DB
         let pubkey = info[0];
@@ -1199,7 +1199,7 @@ _rpc_func = {
         await (await wallet_db).put('recent_cards',card2);
         
         let cardDesc = role? (flag+':'+role): flag;
-        desc = "\u5df2\u5c06 " + cardDesc + " \u4fdd\u5b58\u5230\u672c\u5730\u6570\u636e\u5e93"; // have saved to local DB
+        desc = 'SUCCESS: ' + cardDesc;
       }
     }
     
@@ -1684,7 +1684,7 @@ _rpc_func = {
         ret = 'NETWORK_ERROR';
         if (info) { // [now_tm,expireMins,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
           let cipher = info[7];  // cipher is hex string
-          let url = 'https://' + cryptoHost + '/greencard';
+          let url = 'https://' + cryptoHost + '/csp/greencard';
           
           ret = await wait__(fetch(url,{method:'POST',body:JSON.stringify({cipher:cipher}),referrerPolicy:'no-referrer'}),20000).then( res2 => {
             if (res2.status == 200)
@@ -1799,8 +1799,8 @@ _rpc_func = {
     let cfg = await (await wallet_db).get('config',host);
     if (cfg && cfg.sw_magic !== magic) cfg = null;
     
-    if (cfg) {
-      let bb = cfg.login_child.split(','); // can be 'child1,child2,child3'
+    if (cfg && typeof cfg.login_child == 'string') {
+      let bb = cfg.login_child.split(',');  // can be 'child1,child2,child3'
       let flag = bb.length >= 3? 'gncd': 'pspt';
       let child = parseInt(bb[0]);
       if (child >= 0x80000000) {
