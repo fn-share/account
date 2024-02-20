@@ -34,6 +34,7 @@ const ECC = require('tiny-secp256k1');
 const ECDH = require('create-ecdh')('secp256k1');
 const CryptoJS = require('crypto-js');
 const CreateHash = require('create-hash');
+const CreateHmac = require('create-hmac');
 const Buffer = require('safe-buffer').Buffer;
 const base36 = require('base-x')('0123456789abcdefghijklmnopqrstuvwxyz');
 const bip32 = require('bip32');
@@ -41,6 +42,22 @@ const bip66 = require('bip66');
 
 const REALM_SECRET = '';
 const secp256k_order = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
+
+let REAL_MANAGER = null;
+
+function ripemdHash(buf) {
+  let ha = CreateHash('sha256').update(buf).digest();
+  return CreateHash('ripemd160').update(ha).digest();
+}
+
+function setupRealManager(info) {
+  let tmp = { type:info.type||'' };
+  tmp.rsp_admin_pubkey = Buffer.from(info.rsp_admin_pubkey,'hex');
+  tmp.rsp_admin_fp = ripemdHash(tmp.rsp_admin_pubkey).slice(0,4);
+  tmp.csp_selector = 'https://' + info.csp_selector;
+  tmp.option = info.option;
+  return tmp;
+}
 
 const gen_fix_key = function(phone, psw) {  // psw can be utf-8 string or Buffer instance
   let msg = Buffer.from(REALM_SECRET+':'+phone+':');
@@ -62,26 +79,7 @@ const gen_fix_key = function(phone, psw) {  // psw can be utf-8 string or Buffer
   return ret;
 }
 
-/* // hash256() can be enhanced by ASIC chip, so we change to wasm VDF
-function enhanceFixKey(fixKey) {
-  let data = CreateHash('sha256').update(fixKey).digest(); 
-  let ha = CreateHash('sha256');
-  for (let i=0; i < 1000000; i++) { // less than 1 second mostly
-    ha.update(data);
-  }
-  return ha.digest();
-} */
-
 let _vdfInstance = null;
-let REAL_MANAGER = null;
-
-function setupRealManager(info) {
-  let tmp = { type:info.type||'' };
-  tmp.rsp_admin_pubkey = Buffer.from(info.rsp_admin_pubkey,'hex');
-  tmp.rsp_admin_fp = ripemdHash(tmp.rsp_admin_pubkey).slice(0,4);
-  tmp.csp_selector = 'https://' + info.csp_selector;
-  return tmp;
-}
 
 async function _tryInitVdf() {
   let accInfo = await (await wallet_db).get('config','account');
@@ -143,32 +141,12 @@ startHeartbeat();
 
 //----
 
-const ZERO = Buffer.alloc(1,0);
-
-const DEFAULT_REAL_SERVER = 'www.fn-share.com';
-const DEFAULT_REAL_MANAGER = { type:'',
-  'rsp_admin_pubkey':'028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
-  'csp_selector': 'www.fn-share.com/rsp/crypto_host',
-};
-
-async function wait__(promise_obj, wait) {
-  let abort_fn = null;
-  let abortable_promise = Promise.race([ promise_obj,
-    new Promise( function(resolve, reject) {
-      abort_fn = function() { reject(new Error('TIMEOUT')) };
-    })
-  ]);
-  
-  setTimeout(()=>abort_fn(),wait);
-  return abortable_promise;
-}
-
 function wrapCryptoBuf(msg) {
-  if (msg.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
+  if (msg?.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
     return msg;
-  else if (msg.buffer instanceof ArrayBuffer)  // msg is instance of Buffer
+  else if (msg?.buffer instanceof ArrayBuffer)  // msg is instance of Buffer
     return CryptoJS.lib.WordArray.create(msg);
-  else return CryptoJS.enc.Utf8.parse(msg);    // assume msg is utf-8 string
+  else return CryptoJS.enc.Utf8.parse(msg);     // assume msg is utf-8 string
 }
 
 function AesCbcEncrypt(prv, iv, msg) {
@@ -236,12 +214,24 @@ function generateRand(num) {
   return ret;
 }
 
-function _getSecondTm() {
+function getSecondTm() {
   return Math.floor((new Date()).getTime() / 1000);
 }
 
+async function wait__(promise_obj, wait) {
+  let abort_fn = null;
+  let abortable_promise = Promise.race([ promise_obj,
+    new Promise( function(resolve, reject) {
+      abort_fn = function() { reject(new Error('TIMEOUT')) };
+    })
+  ]);
+  
+  setTimeout(()=>abort_fn(),wait);
+  return abortable_promise;
+}
+
 async function recycleDataStore() {
-  let now = _getSecondTm();
+  let now = getSecondTm();
   let range = IDBKeyRange.lowerBound(86400-now);  // 1 days ago
   let range2 = IDBKeyRange.lowerBound(5184000-now);  // 60 days ago
   let range3 = IDBKeyRange.lowerBound(31536000-now); // 365 days ago
@@ -276,47 +266,13 @@ async function checkCryptoHost() {
   let db = await wallet_db;
   let accInfo = await db.get('config','account');
   if (accInfo) {
-    let now = _getSecondTm();
+    let now = getSecondTm();
     if (!accInfo.csp_list || now - (accInfo.csp_list_tm||0) > 259200) // need renew, 259200 is 3 days
       _renewCryptoHost(db,accInfo,now);  // no wait
   }
 }
 
-// 6m, 15m, 30m, 1h, 3h, 8h, 1d, 7d
-const session_periods = [360,900,1800,3600,10800,28800,86400,604800];
-// 30m, 90m, 5h, 10h, 24h, 3d, 7d, 63d
-const refresh_periods = [1800,5400,18000,36000,86400,259200,604800,5443200];  
-
-const URL_SECRET = ((fixed_secret) => {
-  let last_secret = generateRand(16);
-  
-  return {
-    setLastNonce(nonce) {
-      let nonce2 = Buffer.alloc(16,0); // align to 16 bytes
-      for (let i=0; i < 16; i++) {
-        nonce2[i] = nonce[i] || 0;
-      }
-      last_secret = nonce2;
-    },
-    
-    mixupNonce() {
-      let ret = Buffer.alloc(16,0);
-      for (let i=0; i < 16; i++) {
-        ret[i] = fixed_secret[i] ^ last_secret[i];
-      }
-      return ret;
-    },
-    
-    decodePsw(psw) {
-      let nonce = URL_SECRET.mixupNonce();
-      let psw2 = Buffer.alloc(psw.length,0);
-      for (let i=0; i < psw.length; i++) {
-        psw2[i] = psw[i] ^ nonce[i % 16];
-      }
-      return psw2;
-    },
-  };
-})(generateRand(16));
+//----
 
 const _LOWER_CHAR = 'abcdefghijklmnopqrstuvwxyz';
 const _NUMB_CHAR  = '0123456789';
@@ -397,6 +353,13 @@ function _genRsvdList(rsvd) {  // rsvd should be base36 format
   }
 }
 
+//----
+
+// 6m, 15m, 30m, 1h, 3h, 8h, 1d, 7d
+const session_periods = [360,900,1800,3600,10800,28800,86400,604800];
+// 30m, 90m, 5h, 10h, 24h, 3d, 7d, 63d
+const refresh_periods = [1800,5400,18000,36000,86400,259200,604800,5443200];  
+
 function configCheckBip(psw, accInfo) {
   try {
     let fixKey = gen_fix_key(accInfo.phone,psw);
@@ -458,7 +421,7 @@ async function passNalAuth(db, targHost, targRealm) {
       return 'REALM_MISMATCH';
     
     // step 2: check timeout
-    let now = _getSecondTm();
+    let now = getSecondTm();
     if (info.request_tm >= 3600-now)  // one hour ago
       return 'TIMEOUT';
     
@@ -475,7 +438,7 @@ async function passNalAuth(db, targHost, targRealm) {
       cfg2.login_role = targRole;
       cfg2.login_child = info.child;  // 'child1,child2,child3' means login by green card, if 'child1' and child1 >=0x80000000 means login by meta passport
       cfg2.login_pubkey = info.pubkey;
-      cfg2.login_time = _getSecondTm();
+      cfg2.login_time = getSecondTm();
       cfg2.login_expired = cfg2.login_time + limitSec;
       await db.put('config',cfg2);
     }
@@ -484,8 +447,6 @@ async function passNalAuth(db, targHost, targRealm) {
   
   return 'OK';
 }
-
-//----
 
 function safeCheckCard(flag, children, prefix, content) {
   let child2 = null, child3 = null, isGNCD = children.length == 3;
@@ -569,7 +530,8 @@ function safeCheckCard(flag, children, prefix, content) {
 
 //----
 
-const EMPTY_STRING = Buffer.alloc(32,0);
+const ZERO = Buffer.alloc(1,0);
+const EMPTY_STR32 = Buffer.alloc(32,0);
 
 function _toDER(x) {
   let i = 0;
@@ -617,11 +579,6 @@ function hash256_d(s) { // make double hash, s is utf-8 string or Buffer
     s = Buffer.from(s); // load as utf-8
   }
   return CreateHash('sha256').update(CreateHash('sha256').update(s).digest()).digest();
-}
-
-function ripemdHash(buf) {
-  let ha = CreateHash('sha256').update(buf).digest();
-  return CreateHash('ripemd160').update(ha).digest();
 }
 
 function b36checkEncode(payload, prefix) {
@@ -700,7 +657,7 @@ function scanCardTag(card, tag) {
 }
 
 async function findGreenCard(db, host, pubkey) {
-  let now = _getSecondTm();
+  let now = getSecondTm();
   let range = IDBKeyRange.bound([host,0-now-1209600],[host,0-now-3600]); // 1209600 is 14 days
   let items = await db.getAllFromIndex('recent_cards','host_expired',range,64);
   
@@ -712,7 +669,7 @@ async function findGreenCard(db, host, pubkey) {
   return null;
 }
 
-function _getRsvdCode(phone, psw) {
+function getRsvdCode(phone, psw) {
   let rsvdSour = Buffer.from('LOGIN:'+phone+':'+psw);
   let ha = CreateHash('sha256').update(rsvdSour).digest();
   ha = CreateHash('sha256').update(ha).digest();
@@ -723,10 +680,9 @@ function BipAccount() {
   // we hide some variables here, avoid leaking out by console.log()
   let phone = null, figerprint = null, rsvdCode = '';
   let alternate_no = null, alternate_off = 0;
-  let didRoot = null, pswRoot = null, secureRoot = null, realRoot = null;
+  let didRoot = null, pswRoot = null, realRoot = null;
   let did_realid = null;
   let selfsign_no = null, selfsign = null;
-  let securebox_cipher = '';
   
   let gncd_fetch_keys = [];
   
@@ -737,7 +693,6 @@ function BipAccount() {
     
     disableBip() {   // no need clear: figerprint
       didRoot = null;    // did
-      secureRoot = null; // did/alternate/0
       realRoot = null;   // did/0/0
       pswRoot = null;    // psw/0'
       
@@ -749,7 +704,7 @@ function BipAccount() {
     
     config(secret, accInfo, fp, psw) {
       phone = accInfo.phone;
-      rsvdCode = _getRsvdCode(phone,psw);
+      rsvdCode = getRsvdCode(phone,psw);
       
       alternate_off = accInfo.alternate_off;
       alternate_no = (accInfo.alternate_no + alternate_off) & 0x7fffffff;
@@ -757,15 +712,13 @@ function BipAccount() {
       
       didRoot = bip32.fromPrivateKey(secret.slice(0,32),secret.slice(32,64));
       realRoot = didRoot.derive(0).derive(0);
-      secureRoot = didRoot.derive(alternate_no).derive(0); // "alt/alternate/0" for securebox crypto
-      
       did_realid = b36checkEncode(realRoot.publicKey,'rid1');
       
       selfsign_no = accInfo.selfsign_no;
-      selfsign = realRoot.derive(selfsign_no);
+      selfsign = realRoot.derive(selfsign_no); // selfsign account
       
       pswRoot = bip32.fromPrivateKey(secret.slice(64,96),secret.slice(96,128));
-      pswRoot = pswRoot.derive(0x80000000);   // forget original psw account
+      pswRoot = pswRoot.derive(0x80000000);    // forget original psw account
     },
     
     matchRsvdWord(rsvd2) {
@@ -776,25 +729,31 @@ function BipAccount() {
       return _genRsvdList(rsvdCode);
     },
     
-    secureboxCipher(crc, fixKey, pltPubkey, pdtPubkey) {  // get:rootBip.secureboxCipher(), set:rootBip.secureboxCipher(crc,fixKey,pltPubkey,pdtPubkey)
-      if (!crc && !fixKey) {
-        if (crc === null && fixKey === null)  // clear:rootBip.secureboxCipher(null,null)
-          securebox_cipher = '';
-      }
-      else {
-        ECDH.setPrivateKey(fixKey);
-        let peerPub = ECDH.getPublicKey(undefined,'compressed');
-        let crc4 = Buffer.from(crc,'hex');
-        let r_plt = gen_ecdh_key(Buffer.from(pltPubkey,'hex'),true); // [flag,nonce,k_iv]
-        let r_pdt = gen_ecdh_key(Buffer.from(pdtPubkey,'hex'),false);
-        ECDH.generateKeys();  // erase for safty
-        
-        let msg = Buffer.concat([new Buffer([0,0,4]),crc4,new Buffer([0,alternate_off]),peerPub]);
-        let encrypt = encryptMsg(r_plt[2],msg);
-        encrypt = encryptMsg(r_pdt[2],encrypt);
-        securebox_cipher = (r_plt[0]==1?'03':'02') + r_plt[1].toString('hex') + encrypt.toString();
-      }
-      return securebox_cipher;
+    batchHMac256(msg) {  // msg should be Buffer
+      if (!didRoot) return null;
+      
+      // return hmac(hash256_d(priv32), msg, SHA256)
+      let ha = CreateHash('sha256').update(didRoot.privateKey).digest();
+      ha = CreateHash('sha256').update(ha).digest();
+      return CreateHmac('sha256',ha).update(msg).digest();
+    },
+    
+    argEncrypt(peerPub33, arg) {  // arg can be utf8 string, Buffer, CryptoJS.lib.WordArray
+      if (!realRoot) return null;
+      
+      ECDH.setPrivateKey(realRoot.privateKey);
+      let info = gen_ecdh_key(peerPub33,false);
+      ECDH.generateKeys();  // erase for safty
+      return encryptMsg(info[2],arg); // AES CBC zero-padding, result is CryptoJS.lib.WordArray
+    },
+    
+    argDecrypt(peerPub33, arg) {  // arg should be base64 string
+      if (!realRoot) return null;
+      
+      ECDH.setPrivateKey(realRoot.privateKey);
+      let info = gen_ecdh_key(peerPub33,false);
+      ECDH.generateKeys();  // erase for safty
+      return decryptMsg(info[2],arg); // AES CBC, result.toString(CryptoJS.enc.Hex)
     },
     
     info() {
@@ -820,7 +779,7 @@ function BipAccount() {
         let ret = realRoot.derive(child[0] & 0x7fffffff);
         let child2 = child[1];
         if (typeof child2 == 'number') {
-          ret.chainCode = EMPTY_STRING;
+          ret.chainCode = EMPTY_STR32;
           ret = ret.derive(child2 & 0x7fffffff);
           let child3 = child[2];
           if (typeof child3 == 'number')
@@ -856,7 +815,7 @@ function BipAccount() {
       if (b.length == 3) {
         let child2 = parseInt(b[1]) & 0x7fffffff;
         let child3 = parseInt(b[2]) & 0x7fffffff;
-        didAcc.chainCode = EMPTY_STRING;
+        didAcc.chainCode = EMPTY_STR32;
         didAcc = didAcc.derive(child2).derive(child3);
       }
       
@@ -864,22 +823,6 @@ function BipAccount() {
       if (ctx) s += ':';   // ctx can be ''
       let ha = CreateHash('sha256').update(Buffer.concat([Buffer.from(s),Buffer.from(ctx,'hex')])).digest();
       return [didAcc.publicKey,signDer(didAcc,ha)];
-    },
-    
-    encryptSecurebox(ctx) {
-      let msg = CryptoJS.enc.Utf8.parse(ctx);
-      let padding = msg.sigBytes % 16;
-      if (padding) padding = 16 - padding;
-      
-      let key_iv = secureRoot.privateKey;  // 32 bytes
-      let segment = AesCtrEncrypt(key_iv.slice(0,16),key_iv.slice(16,32),msg);
-      return [msg.sigBytes,padding,segment.toString(CryptoJS.enc.Base64)];
-    },
-    
-    decryptSecurebox(ctx) {
-      let key_iv = secureRoot.privateKey;  // 32 bytes
-      let ret = AesCtrDecrypt(key_iv.slice(0,16),key_iv.slice(16,32),ctx); // decrypt with CTR and zero padding
-      return ret.toString(CryptoJS.enc.Hex);
     },
     
     _newPassport(isAcc20, realm, tmSegment, child, didAcc, now_tm, expiredTm,adminFP) {
@@ -919,7 +862,7 @@ function BipAccount() {
     
     newPassport(isAcc20, sessType, realm, child, now, expiredTm) {
       // step 1: caculate time related variables
-      let tmSegment, maxExpired, nowSec = _getSecondTm();
+      let tmSegment, maxExpired, nowSec = getSecondTm();
       if (!now)   // creating meta-passport
         tmSegment = 0;
       else tmSegment = Math.floor(nowSec / refresh_periods[sessType & 0x07]);
@@ -951,7 +894,7 @@ function BipAccount() {
     
     newSelfSignPspt(sessType, realm, expiredTm) {  // expiredTm is seconds or undefined
       // step 1: caculate time related variables
-      let nowSec = _getSecondTm();
+      let nowSec = getSecondTm();
       let now = parseInt(nowSec / 60);  // by minutes
       let tmSegment = Math.floor(nowSec / refresh_periods[sessType & 0x07]);
       
@@ -971,25 +914,14 @@ function BipAccount() {
       return this._newPassport(false,realm,tmSegment,selfsign_no,selfsign,now_tm,expiredTm,adminFP);
     },
     
-    async genGreencardCipher(adminPub, expireMins, visaCard, suggestChild, pltPub, devPub) { // suggestChild is null or string
+    genGreencardCipher(nowTm, adminPub, expireMins, visaCard, child2, child3, pltPub, devPub) { // suggestChild is null or string
       let child1 = parseInt(visaCard.child) & 0x7fffffff;
-      let child2 = Math.floor(Math.random()*0x7fffffff) + 1;
-      let child3 = Math.floor(Math.random()*0x7fffffff) + 1; 
-      if (suggestChild) {
-        let b = suggestChild.split(',');
-        if (b.length == 2) {  // can reuse old one
-          child2 = parseInt(b[0]) & 0x7fffffff;
-          child3 = parseInt(b[1]) & 0x7fffffff;
-        }
-      }
-      
       let ownerAcc = realRoot.derive(child1);
-      ownerAcc.chainCode = EMPTY_STRING;
+      ownerAcc.chainCode = EMPTY_STR32;
       let targAcc = ownerAcc.derive(child2).derive(child3);
       
       let rootcode = Buffer.concat([ownerAcc.publicKey,Buffer.from(':'+child2+'/'+child3)]);
       rootcode = CreateHash('sha256').update(rootcode).digest().slice(0,4);
-      let now_tm = Math.floor((new Date()).getTime() / 60000);  // by minutes
       
       let bufCard = Buffer.from(visaCard.content,'hex');
       let cipherSize = 55 + bufCard.length;
@@ -1003,7 +935,7 @@ function BipAccount() {
       }
       let maxAuth = scanCardTag(bufCard,0xcf);  // TAG_MAX_AUTH_TIME, by minutes
       if (maxAuth) {
-        maxAuth = now_tm + maxAuth.readUInt32BE(0);
+        maxAuth = nowTm + maxAuth.readUInt32BE(0);
         if (expireMins > maxAuth) expireMins = maxAuth;
       }
       
@@ -1012,7 +944,7 @@ function BipAccount() {
       rootcode.copy(cipherBuf,off); off += 4;
       cipherBuf.writeUInt32BE(child2,off); off += 4;
       cipherBuf.writeUInt32BE(child3,off); off += 4;
-      cipherBuf.writeUInt32BE(now_tm,off); off += 4;
+      cipherBuf.writeUInt32BE(nowTm,off); off += 4;
       cipherBuf.writeUInt32BE(expireMins,off); off += 4;
       cipherBuf.writeUInt16BE(bufCard.length,off); off += 2;  // off = 55
       bufCard.copy(cipherBuf,off); off += bufCard.length;
@@ -1027,14 +959,13 @@ function BipAccount() {
       
       tmpPub = (r_plt[0]?'03':'02') + r_plt[1].toString('hex');
       gncd_fetch_keys.push([tmpPub,r_plt[2],r_pdt[2]]);
-      if (gncd_fetch_keys.length > 5)  // max hold 5 items
-        gncd_fetch_keys.splice(0,gncd_fetch_keys.length - 3);
+      if (gncd_fetch_keys.length > 12)  // max hold 12 items
+        gncd_fetch_keys.splice(0,gncd_fetch_keys.length - 12);
       
       cipherBuf = encryptMsg(r_plt[2],cipherBuf);
       cipherBuf = encryptMsg(r_pdt[2],cipherBuf);
       
-      info = [now_tm,expireMins,child1,child2,child3,targAcc.publicKey,rootcode,tmpPub+cipherBuf.toString()];
-      return info;
+      return [expireMins,child1,child2,child3,targAcc.publicKey,rootcode,tmpPub+cipherBuf.toString()];
     },
     
     decryptGreencard(hexPubkey, content, padding) {  // content should be base64 string
@@ -1059,7 +990,7 @@ const rootBip = BipAccount();
 
 function _getHost(sender) {
   let host = sender.origin.split('://')[1] || '';
-  if (host == 'localhost:9000') host = NAL_WEBHOST;  // for NAL debugging
+  // if (host == 'localhost:9000') host = NAL_WEBHOST;  // for NAL debugging
   return host;
 }
 
@@ -1070,7 +1001,189 @@ async function _waitReturn(ret, tm) {
   return await waitable;
 }
 
-_rpc_func = {
+const DEFAULT_REAL_SERVER = 'www.fn-share.com';
+const DEFAULT_REAL_MANAGER = { type:'',
+  'rsp_admin_pubkey': '028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
+  'csp_selector': 'www.fn-share.com/rsp/crypto_host',
+  'option': {style:'ONE', renew_after:2, report_error:true},
+};
+
+const URL_SECRET = ((fixed_secret) => {
+  let last_secret = generateRand(16);
+  
+  return {
+    setLastNonce(nonce) {
+      let nonce2 = Buffer.alloc(16,0); // align to 16 bytes
+      for (let i=0; i < 16; i++) {
+        nonce2[i] = nonce[i] || 0;
+      }
+      last_secret = nonce2;
+    },
+    
+    mixupNonce() {
+      let ret = Buffer.alloc(16,0);
+      for (let i=0; i < 16; i++) {
+        ret[i] = fixed_secret[i] ^ last_secret[i];
+      }
+      return ret;
+    },
+    
+    decodePsw(psw) {
+      let nonce = URL_SECRET.mixupNonce();
+      let psw2 = Buffer.alloc(psw.length,0);
+      for (let i=0; i < psw.length; i++) {
+        psw2[i] = psw[i] ^ nonce[i % 16];
+      }
+      return psw2;
+    },
+  };
+})(generateRand(16));
+
+let _fetchGncdErrNum = 0;
+
+function newGncdPromise(host, role, url, info) {
+  let ret = 'NETWORK_ERROR';
+  let cipher = info[6];  // cipher is hex string
+  
+  return wait__(fetch(url,{method:'POST',body:JSON.stringify({cipher}),referrerPolicy:'no-referrer'}),20000).then( res => {
+    if (res.status == 200)
+      return res.json();
+    else {
+      if (res.status == 400)
+        return res.text();
+      else return 'REQUEST_FAIL';
+    }
+  }, e => 'NETWORK_ERROR').then( data => {
+    if (data && data.card) { // data.card is base64 string
+      let hexCard = rootBip.decryptGreencard(cipher.slice(0,66),data.card,data.padding);
+      if (hexCard && hexCard.slice(0,8) != '676e6364') // not 'gncd'
+        hexCard = '';
+      
+      if (hexCard) {
+        let save_tm = getSecondTm();
+        let expired = 0 - info[0] * 60;
+        let targ_pubkey = info[4].toString('hex');
+        let card_record = { host,role,save_tm,expired, flag:'gncd',
+          child: info[1] + ',' + info[2] + ',' + info[3],
+          pubkey:targ_pubkey, content:hexCard };
+        
+        ret = { role, expired:info[0], targ_pubkey, card:hexCard, card_record };
+      }
+      else ret = 'UNKNOWN_CARD';
+    }
+    else if (typeof data == 'string') {
+      ret = data;
+    }
+    // else, ret = 'NETWORK_ERROR';
+    
+    return ret;
+  });
+}
+
+async function requestGncd(host, role, db, accInfo, now, adminPub, expireMins, card, suggestChild, cspList) {
+  let opt = REAL_MANAGER.option || {};
+  let optStyle = opt.style || 'ONE';  // 'ONE' or 'MANY'
+  let optRenewAfter = opt.renew_after || 2;  // try renew csp_list when meet N failed request
+  let optReportError = opt.report_error || false;  // report error to rsp or not
+  
+  let num = cspList.length;
+  if (num == 0) return 'SYSTEM_ERROR';
+  
+  let cspSites = [];
+  if (optStyle == 'ONE')
+    cspSites.push(cspList[Math.floor(Math.random()*num)]);
+  else cspSites = cspList.slice(0,Math.min(num,3));   // cspList.length is 1,2,3
+  
+  let child2 = Math.floor(Math.random()*0x7fffffff) + 1;
+  let child3 = Math.floor(Math.random()*0x7fffffff) + 1; 
+  if (suggestChild) {
+    let b = suggestChild.split(',');
+    if (b.length == 2) {  // can reuse old one
+      child2 = parseInt(b[0]) & 0x7fffffff;
+      child3 = parseInt(b[1]) & 0x7fffffff;
+    }
+  }
+  
+  let promises = [];
+  for (let i=0,cspItem; cspItem = cspSites[i]; i++) {
+    let cryptoHost = cspItem[0];
+    let cryptoPlt = Buffer.from(cspItem[1],'hex');
+    let cryptoDev = Buffer.from(cspItem[2],'hex');
+    let nowTm = Math.floor((new Date()).getTime() / 60000);  // by minutes
+    let url = 'https://' + cryptoHost + '/csp/greencard';
+    let info = rootBip.genGreencardCipher(nowTm,adminPub,expireMins,card,child2,child3,cryptoPlt,cryptoDev);
+    promises.push(newGncdPromise(host,role,url,info));
+  }
+  
+  let abort_fn = null, timePromise = new Promise( function(resolve, reject) {
+    abort_fn = function() { reject(new Error('TIMEOUT')) };
+  });
+  let topPromise = promises.length <= 2? Promise.race([...promises,timePromise]):
+    Promise.race([Promise.all(promises),timePromise]);
+  setTimeout(()=>abort_fn(),20000);  // max wait 20 seconds
+  
+  return await topPromise.then( res => {
+    if (res instanceof Array) {
+      let item, items = [];
+      for (let i=0; item=res[i]; i++) {
+        if (typeof item == 'string') {
+          if (item === 'REQUEST_FAIL' || item === 'NETWORK_ERROR')
+            _fetchGncdErrNum += 1;
+        }
+        else if (typeof item.card_record == 'object')
+          items.push(item);
+      }
+      
+      if (items.length >= 3) {
+        let card0 = (items[0].card_record.card || '').slice(0,-132); // remove TAG_SIGNATURE hex string
+        let card1 = (items[1].card_record.card || '').slice(0,-132);
+        let card2 = (items[2].card_record.card || '').slice(0,-132);
+        let errIdx = -1;
+        if (card0 && card0 == card1) {
+          if (card1 == card2)
+            item = items[0];
+          else errIdx = 2;
+        }
+        else if (card0 && card0 == card2) {
+          item = items[0];
+          errIdx = 1;
+        }
+        else if (card1 && card1 == card2) {
+          item = items[1];
+          errIdx = 0;
+        }
+        else return 'REQUEST_FAIL';  // card0 != card1 && card0 != card2 && card1 != card2
+        
+        if (errIdx >= 0 && optReportError) {
+          let errItem = items[errIdx];
+          if (errItem.card_record.card) {  // report error
+            let url = 'https://' + (accInfo.real_sp || DEFAULT_REAL_SERVER) + '/rsp/report_error';
+            let option = {method:'POST',body:JSON.stringify(errItem.card_record),referrerPolicy:'no-referrer'};
+            wait__(fetch(url,option),20000).catch(e => null);  // no await
+          }
+        }
+      }
+      else if (items.length >= 1) {
+        item = items[0];
+      }
+      else return 'REQUEST_FAIL';
+      
+      let cardRec = item.card_record;
+      db.put('recent_cards',cardRec); // no waiting
+      
+      if (_fetchGncdErrNum >= optRenewAfter) {
+        _fetchGncdErrNum = 0;
+        _renewCryptoHost(db,accInfo,now);
+      }
+      
+      delete item.card_record;
+      return item;
+    }
+    else return 'REQUEST_FAIL';
+  }).catch(e => 'NETWORK_ERROR');
+}
+
+const _rpc_func = {
   async ver_info(request, sender) {
     let value = await (await wallet_db).get('config','ver_info');  // if failed take it as null
     return {result:value || null};  // null means no NBC account saved yet
@@ -1084,7 +1197,7 @@ _rpc_func = {
     let hostCfg = await db.get('config',host);
     if (!hostCfg) hostCfg = {name:host};
     hostCfg.sw_magic = sw_magic;
-    hostCfg.magic_tm = 0 - _getSecondTm();
+    hostCfg.magic_tm = 0 - getSecondTm();
     await db.put('config', hostCfg);
 
     if (host === NAL_WEBHOST)
@@ -1095,6 +1208,10 @@ _rpc_func = {
     let strategy_ver = hostCfg.strategy?.strategy_ver || null;
     let storage = hostCfg.storage || null;
     return {result:{sw_magic,strategy_ver,host,storage,ver_info}};
+  },
+  
+  async is_ready(request, sender) {
+    return {result:rootBip.hasInit()?'READY':'NONE'};
   },
   
   async pass_nonce(request, sender) {
@@ -1192,7 +1309,7 @@ _rpc_func = {
         let pubkey = info[0];
         let expired = info[1] * 60;
         let role = info[2];
-        let save_tm = _getSecondTm();
+        let save_tm = getSecondTm();
         let card2 = {host,flag,role,child,pubkey,content:card.toString('hex'),save_tm,expired:0-expired};
         if (comefrom) card2.comefrom = comefrom;
         
@@ -1275,7 +1392,7 @@ _rpc_func = {
               ret = 'INVALID_ROLE';
             else if (typeof actionLv != 'number')
               ret = 'INVALID_ACTION';
-            else if (_getSecondTm() >= cfg.login_expired)
+            else if (getSecondTm() >= cfg.login_expired)
               ret = 'NOT_LOGIN';
             else {
               ret = 'NONE';
@@ -1388,7 +1505,7 @@ _rpc_func = {
         if (info) {
           await db.delete('wait_sign',targHost);  // remove by admin peer
           
-          let now = _getSecondTm();
+          let now = getSecondTm();
           info.sign_tm = 0 - now;  // cancel sign: no info.signature, no info.pubkey
           await db.put('sign_history',info);
         }
@@ -1419,7 +1536,7 @@ _rpc_func = {
         if (!targHost) targHost = host;
       }
       
-      let now = _getSecondTm();
+      let now = getSecondTm();
       if (typeof tillTm != 'number') {
         let sessType = cfg.strategy?.session_type;
         if (typeof sessType != 'number') sessType = 1;
@@ -1483,7 +1600,7 @@ _rpc_func = {
       let cfg = await db.get('config',host); // cfg:{name,sw_magic,magic_tm,strategy,storage}+{...other_cfg}
       if (cfg && cfg.sw_magic === magic) {
         if (typeof tillTm != 'number')
-          tillTm = _getSecondTm();
+          tillTm = getSecondTm();
         let range = IDBKeyRange.upperBound(0-tillTm);
         let storeIndex = db.transaction(['recent_cards'],'readonly').objectStore('recent_cards').index('expired');
         
@@ -1518,7 +1635,7 @@ _rpc_func = {
       if (typeof sessType != 'number') sessType = 1;
       
       let period = session_periods[sessType & 0x07];
-      let now = _getSecondTm();
+      let now = getSecondTm();
       let metaExpired = 0 - now - Math.min(period,(cfg.strategy?.meta_pspt_expired || 12) * 3600);
       let range = IDBKeyRange.bound([host,0-now-1209600],[host,0-now-period]); // 1209600 is 14 days
       let items = await db.getAllFromIndex('recent_cards','host_expired',range,32);
@@ -1576,7 +1693,7 @@ _rpc_func = {
               else {
                 let pubkey = info2[0];
                 let expired = info2[1] * 60;
-                let save_tm = _getSecondTm();
+                let save_tm = getSecondTm();
                 let card2 = { host, flag:'pspt', role:'', child:child2+'',
                   pubkey, content:passport, save_tm, expired:0-expired };
                 db.put('recent_cards',card2); // no waiting
@@ -1614,30 +1731,24 @@ _rpc_func = {
       
       adminPub = Buffer.from(adminPub,'hex');
       
-      let card = null, accInfo = null;
-      let cryptoHost = null, cryptoPlt = null, cryptoDev = null;
-      let now = _getSecondTm();
+      let card = null, accInfo = null, cspList = null;
       if (adminPub.length == 33 && typeof expireMins == 'number') {
         card = await db.get('recent_cards',[host,'visa',role,child+'']);
         if (card) {
           accInfo = await db.get('config','account');
-          let cspList = accInfo?.csp_list;
-          if (cspList) {
-            cspList = cspList[0];  // hint: current only support fetch GNCD card from the first CSP node
-            cryptoHost = cspList[0]; cryptoPlt = cspList[1]; cryptoDev = cspList[2];
-          }
-          else {
-            if (accInfo)
-              _renewCryptoHost(db,accInfo,now);
-          }
+          cspList = accInfo?.csp_list;
         }
       }
       
+      let now = getSecondTm();
       if (!card)
         ret = 'NO_CARD';
-      else if (!cryptoHost || !cryptoPlt || !cryptoDev)
+      else if (!(cspList instanceof Array) || cspList.length == 0) {
+        if (accInfo)
+          _renewCryptoHost(db,accInfo,now);
         ret = 'NETWORK_ERROR';
-      else {
+      }
+      else {  // asset(accInfo)
         if (typeof reuseMins != 'number') {
           let sessType = cfg.strategy?.session_type;
           let sessLimit = cfg.strategy?.session_limit;
@@ -1671,58 +1782,14 @@ _rpc_func = {
           }
         }
         
-        if (suggestCard) {  // reuse recent one
+        if (suggestCard) {  // reuse recent GNCD card
           ret = { role, expired: Math.floor(suggestExp/60),
             targ_pubkey:suggestCard.pubkey, card:suggestCard.content };
           return {result:ret};
         }
         
-        cryptoPlt = Buffer.from(cryptoPlt,'hex');
-        cryptoDev = Buffer.from(cryptoDev,'hex');
-        let info = await rootBip.genGreencardCipher(adminPub,expireMins,card,suggestChild,cryptoPlt,cryptoDev);
-        
-        ret = 'NETWORK_ERROR';
-        if (info) { // [now_tm,expireMins,child1,child2,child3,targPubkey,rootcode,tmpPub+cipherBuf.toString()]
-          let cipher = info[7];  // cipher is hex string
-          let url = 'https://' + cryptoHost + '/csp/greencard';
-          
-          ret = await wait__(fetch(url,{method:'POST',body:JSON.stringify({cipher:cipher}),referrerPolicy:'no-referrer'}),20000).then( res2 => {
-            if (res2.status == 200)
-              return res2.json();
-            else {
-              if (res2.status == 400)
-                return res2.text();
-              else return 'REQUEST_FAIL';
-            }
-          }, e => 'NETWORK_ERROR').then( data => {
-            if (data && data.card) { // data.card is base64 string
-              let hexCard = rootBip.decryptGreencard(cipher.slice(0,66),data.card,data.padding);
-              if (hexCard && hexCard.slice(0,8) != '676e6364') // not 'gncd'
-                hexCard = '';
-              
-              if (hexCard) {
-                let save_tm = _getSecondTm();
-                let expired = 0 - info[1] * 60;
-                let targ_pubkey = info[5].toString('hex');
-                let cardRec = { host,role,save_tm,expired, flag:'gncd',
-                  child: info[2] + ',' + info[3] + ',' + info[4],
-                  pubkey:info[5].toString('hex'), content:hexCard };
-                db.put('recent_cards',cardRec); // no waiting
-                
-                ret = { role, expired:info[1], targ_pubkey, card:hexCard };
-              }
-              else ret = 'UNKNOWN_CARD';
-            }
-            else if (typeof data == 'string') {
-              if (data == 'REQUEST_FAIL' || data == 'NETWORK_ERROR')
-                _renewCryptoHost(db,accInfo,now);
-              ret = data;
-            }
-            // else, ret = 'NETWORK_ERROR';
-            
-            return ret;
-          });
-        }
+        ret = await requestGncd(host,role,db,accInfo,now,adminPub,expireMins,card,suggestChild,cspList);
+        console.log('here fetch gncd:',ret);
       }
     }
     
@@ -1780,7 +1847,7 @@ _rpc_func = {
       else {
         let pubkey = info[0];
         let expired = info[1] * 60;
-        let save_tm = _getSecondTm();
+        let save_tm = getSecondTm();
         let card = {host,flag,role,child,pubkey,content,save_tm,expired:0-expired};
         if (typeof comefrom == 'string' && comefrom) card.comefrom = comefrom;
         
@@ -1905,7 +1972,7 @@ _rpc_func = {
         ret = 'NEED_PASS';
         tryDelay = true;
       }
-      else ret = _getRsvdCode(accInfo.phone,psw);
+      else ret = getRsvdCode(accInfo.phone,psw);
     }
     else ret = 'NOT_READY';
     
@@ -1930,28 +1997,27 @@ _rpc_func = {
     else ret = 'INVALID_ARGS';
     return {result:ret};
   },
-  /*
-  async last_cryptohost(request, sender) {
+  
+  async last_csp_list(request, sender) {
     let db = await wallet_db;
     let accInfo = await db.get('config','account');
     let cspList = accInfo?.csp_list;
     
     let forceRenew = request.param[0], expireTm = request.param[1] || 259200;  // 259200 is 3 days
     let last_renew = accInfo.csp_list_tm || 0;
-    let now = _getSecondTm();
-    if (forceRenew || !cspList || (now - last_renew) > expireTm) {
+    let now = getSecondTm();
+    if (forceRenew || !cspList || (now - last_renew) > expireTm)
       _renewCryptoHost(db,accInfo,now);   // no waiting
-    }
     
-    return {result:{host:(cspList?cspList[0][0]:''),last_renew}};
-  }, */
+    return {result:{hosts:(cspList instanceof Array?cspList:[]),last_renew}};
+  },
   
   async save_account(request, sender) {
     let host = _getHost(sender);
     if (host !== NAL_WEBHOST)
       return {result:'INVALID_WEB_HOST'};
     
-    let now = _getSecondTm();
+    let now = getSecondTm();
     let db = await wallet_db;
     let ver_info = await db.get('config','ver_info');
     if (!ver_info)
@@ -2019,7 +2085,7 @@ _rpc_func = {
       ret = 'NOT_READY';
     
     if (!ret) {
-      let now = _getSecondTm();
+      let now = getSecondTm();
       let info = rootBip.signDisabling(now);
       ret = {time:now, account:info[0], signature:info[1]};
     }
@@ -2058,18 +2124,20 @@ _rpc_func = {
   },
   
   async vdf_result(request, sender) {
-    let ret = Buffer.from(request.param[0],'hex'), loop = parseInt(request.param[1]) || 10000;
+    let ret = '', loop = parseInt(request.param[1]) || 10000;
     if (_vdfInstance === null) setTimeout(_tryInitVdf,0);
     if (_vdfInstance) {
       try {
+        ret = Buffer.from(request.param[0],'hex');
         ret = _vdfInstance.generate(loop,ret,512,false); // intSizeBits=512, isPietrzak=false
+        ret = CreateHash('sha512').update(ret).digest().toString('hex');
       }
       catch(e) {
         console.log(e);
+        ret = '';
       }
     }
     
-    ret = CreateHash('sha512').update(ret).digest().toString('hex');
     return {result:ret};
   },
   
@@ -2087,7 +2155,7 @@ _rpc_func = {
     
     let ret = 'NONE';
     if (cfg) {
-      let range = IDBKeyRange.lowerBound(0-_getSecondTm());
+      let range = IDBKeyRange.lowerBound(0-getSecondTm());
       let items = await db.getAllFromIndex('sign_history','sign_tm',range,200);
       
       ret = [];
@@ -2135,7 +2203,7 @@ _rpc_func = {
     
     let ret = 'NONE';
     if (cfg) {
-      let range = IDBKeyRange.lowerBound(0-_getSecondTm());
+      let range = IDBKeyRange.lowerBound(0-getSecondTm());
       let items = await db.getAllFromIndex('config','magic_tm',range,100);
       
       ret = [];
@@ -2189,6 +2257,8 @@ _rpc_func = {
       
       let accInfo = await db.get('config','account');
       if (accInfo) {
+        let opt = info.option || {};
+        info.option = { ...DEFAULT_REAL_MANAGER.option, ...opt };
         let tmp = setupRealManager(info);
         
         accInfo.real_sp = url;
@@ -2196,7 +2266,7 @@ _rpc_func = {
         await db.put('config',accInfo);
         REAL_MANAGER = tmp;
         
-        _renewCryptoHost(db,accInfo,_getSecondTm());
+        _renewCryptoHost(db,accInfo,getSecondTm());
         ret = 'OK';
       }
     }
@@ -2297,7 +2367,7 @@ _rpc_func = {
     
     let cfg = null;
     if (host === NAL_WEBHOST) {
-      cfg = await db.get('config',host); // cfg:{name,sw_magic,magic_tm,strategy,storage}+{...other_cfg}
+      cfg = await db.get('config',host);  // cfg:{name,sw_magic,magic_tm,strategy,storage}+{...other_cfg}
       if (cfg && cfg.sw_magic !== magic)
         cfg = null;
     }
@@ -2322,6 +2392,7 @@ _rpc_func = {
       }
       else ret = 'NOT_READY';
     }
+    
     return {result:ret};
   },
   
@@ -2361,8 +2432,60 @@ _rpc_func = {
     return {result:ret};
   },
   
-  async shakehand(request, sender) {
-    return {result:''};
+  async batch_key(request, sender) {
+    let ret;
+    if (!rootBip.hasInit())
+      ret = 'WAIT_PASS';  // failed
+    else {
+      let msg = request.param[0] || '';  // should be utf8 string
+      ret = rootBip.batchHMac256(Buffer.from(msg)).toString('hex');
+    }
+    return {result:ret};
+  },
+  
+  async arg_encrypt(request, sender) {
+    let ret;
+    let peerPub = Buffer.from(request.param[0] || '','hex');
+    
+    if (!rootBip.hasInit())
+      ret = 'WAIT_PASS';
+    else if (peerPub.length != 33)
+      ret = '';
+    else {
+      let msg = request.param[1] || '';  // can be utf-8, hex, base64 string
+      let format = (request.param[2] || '').toLowerCase();
+      if (format != 'hex' && format != 'base64')
+        format = 'utf-8';
+      msg = Buffer.from(msg,format);
+      
+      if (format == 'utf-8') format = 'hex';
+      ret = rootBip.argEncrypt(peerPub,msg).toString(format);
+    }
+    
+    return {result:ret};
+  },
+  
+  async arg_decrypt(request, sender) {
+    let ret;
+    let peerPub = Buffer.from(request.param[0] || '','hex');
+    
+    if (!rootBip.hasInit())
+      ret = 'WAIT_PASS';
+    else if (peerPub.length != 33)
+      ret = '';
+    else {
+      let msg = request.param[1] || '';  // can be hex, base64 string
+      let format = (request.param[2] || '').toLowerCase();
+      if (format != 'base64')
+        msg = Buffer.from(msg,'hex').toString('base64');
+      
+      ret = rootBip.argDecrypt(peerPub,msg);
+      if (format == 'base64')
+        ret = ret.toString(CryptoJS.enc.Base64);
+      else ret = ret.toString(CryptoJS.enc.Hex);
+    }
+    
+    return {result:ret};
   },
 }
 
