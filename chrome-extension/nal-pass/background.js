@@ -45,19 +45,19 @@ const secp256k_order = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03
 
 let REAL_MANAGER = null;
 
-function ripemdHash(buf) {
+const ripemdHash = function(buf) {
   let ha = CreateHash('sha256').update(buf).digest();
   return CreateHash('ripemd160').update(ha).digest();
-}
+};
 
-function setupRealManager(info) {
+const setupRealManager = function(info) {
   let tmp = { type:info.type||'' };
   tmp.rsp_admin_pubkey = Buffer.from(info.rsp_admin_pubkey,'hex');
   tmp.rsp_admin_fp = ripemdHash(tmp.rsp_admin_pubkey).slice(0,4);
   tmp.csp_selector = 'https://' + info.csp_selector;
   tmp.option = info.option;
   return tmp;
-}
+};
 
 const gen_fix_key = function(phone, psw) {  // psw can be utf-8 string or Buffer instance
   let msg = Buffer.from(REALM_SECRET+':'+phone+':');
@@ -77,11 +77,11 @@ const gen_fix_key = function(phone, psw) {  // psw can be utf-8 string or Buffer
   let ret = Buffer.alloc(32,0);
   n.copy(ret,32 - n.length,0);  // copy(targBuffer,targStart,sourStart,sourEnd)
   return ret;
-}
+};
 
 let _vdfInstance = null;
 
-async function _tryInitVdf() {
+const _tryInitVdf = async function() {
   let accInfo = await (await wallet_db).get('config','account');
   if (accInfo?.real_manager)
     REAL_MANAGER = setupRealManager(accInfo.real_manager);
@@ -96,11 +96,11 @@ async function _tryInitVdf() {
     console.log(e);
     _vdfInstance = null;
   }
-}
+};
 
 if (_vdfInstance === null) _tryInitVdf();
 
-function enhanceFixKey(fixKey) {
+const enhanceFixKey = function(fixKey) {
   if (_vdfInstance === null) _tryInitVdf();
   if (!_vdfInstance) return fixKey;
   
@@ -113,43 +113,43 @@ function enhanceFixKey(fixKey) {
     console.log(e);
     return fixKey;
   }
-}
+};
 
 //----
 
 let _heartbeatTask = 0;
 
-async function runHeartbeat() {
+const runHeartbeat = async function() {
   await chrome.storage.local.set({'last-heartbeat': (new Date()).getTime()});
-}
+};
 
-async function startHeartbeat() {  // runHeartbeat task to holding SW alive
+const startHeartbeat = async function() {  // runHeartbeat task to holding SW alive
   runHeartbeat().then(() => {
     _heartbeatTask = setInterval(runHeartbeat, 20000); // run every 20 seconds
   });
-}
+};
 
-async function stopHeartbeat() {
+const stopHeartbeat = async function() {
   clearInterval(_heartbeatTask);
-}
+};
 
-async function getLastHeartbeat() {
+const getLastHeartbeat = async function() {
   return (await chrome.storage.local.get('last-heartbeat'))['last-heartbeat'];
-}
+};
 
 startHeartbeat();
 
 //----
 
-function wrapCryptoBuf(msg) {
+const wrapCryptoBuf = function(msg) {
   if (msg?.words instanceof Array)  // msg is instance of CryptoJS.lib.WordArray
     return msg;
   else if (msg?.buffer instanceof ArrayBuffer)  // msg is instance of Buffer
     return CryptoJS.lib.WordArray.create(msg);
   else return CryptoJS.enc.Utf8.parse(msg);     // assume msg is utf-8 string
-}
+};
 
-function AesCbcEncrypt(prv, iv, msg) {
+const AesCbcEncrypt = function(prv, iv, msg) {
   prv = wrapCryptoBuf(prv);
   iv = wrapCryptoBuf(iv);
   msg = wrapCryptoBuf(msg);
@@ -161,9 +161,9 @@ function AesCbcEncrypt(prv, iv, msg) {
   });
   // encrypted.toString() is base64-string, encrypted.ciphertext.toString() is hex-string
   return encrypted.ciphertext;  // return CryptoJS.lib.WordArray
-}
+};
 
-function AesCbcDecrypt(prv, iv, msg, zeroPad) { // msg must be base64 string, default NoPadding
+const AesCbcDecrypt = function(prv, iv, msg, zeroPad) { // msg must be base64 string, default NoPadding
   prv = wrapCryptoBuf(prv);
   iv = wrapCryptoBuf(iv);
   
@@ -172,9 +172,9 @@ function AesCbcDecrypt(prv, iv, msg, zeroPad) { // msg must be base64 string, de
     mode: CryptoJS.mode.CBC,
     padding: typeof zeroPad == 'number'? CryptoJS.pad.ZeroPadding: CryptoJS.pad.NoPadding
   });  // return CryptoJS.lib.WordArray
-}
+};
 
-function AesCtrEncrypt(prv, iv, msg) {
+const AesCtrEncrypt = function(prv, iv, msg) {
   prv = wrapCryptoBuf(prv);
   iv = wrapCryptoBuf(iv);
   msg = wrapCryptoBuf(msg);
@@ -185,9 +185,9 @@ function AesCtrEncrypt(prv, iv, msg) {
     padding: CryptoJS.pad.ZeroPadding
   });
   return encrypted.ciphertext;  // return CryptoJS.lib.WordArray
-}
+};
 
-function AesCtrDecrypt(prv, iv, msg, noPad) { // msg must be base64 string, default ZeroPadding
+const AesCtrDecrypt = function(prv, iv, msg, noPad) { // msg must be base64 string, default ZeroPadding
   prv = wrapCryptoBuf(prv);
   iv = wrapCryptoBuf(iv);
   
@@ -196,29 +196,29 @@ function AesCtrDecrypt(prv, iv, msg, noPad) { // msg must be base64 string, defa
     mode: CryptoJS.mode.CTR,
     padding: noPad? CryptoJS.pad.NoPadding: CryptoJS.pad.ZeroPadding
   });  // return CryptoJS.lib.WordArray
-}
+};
 
-function encryptMsg(k_iv, msg) { // msg can be: utf-8-string, Buffer, CryptoJS.lib.WordArray
+const encryptMsg = function(k_iv, msg) { // msg can be: utf-8-string, Buffer, CryptoJS.lib.WordArray
   return AesCbcEncrypt(k_iv.slice(0,16),k_iv.slice(16,32),msg);
-}
+};
 
-function decryptMsg(k_iv, msg) { // msg only can be base64
+const decryptMsg = function(k_iv, msg) { // msg only can be base64
   return AesCbcDecrypt(k_iv.slice(0,16),k_iv.slice(16,32),msg);
-}
+};
 
-function generateRand(num) {
+const generateRand = function(num) {
   let ret = Buffer.alloc(num,0);
   for (let i=0; i < num; i++) {
     ret[i] = Math.floor(Math.random() * 256);  // 0 ~ 255
   }
   return ret;
-}
+};
 
-function getSecondTm() {
+const getSecondTm = function() {
   return Math.floor((new Date()).getTime() / 1000);
-}
+};
 
-async function wait__(promise_obj, wait) {
+const wait__ = async function(promise_obj, wait) {
   let abort_fn = null;
   let abortable_promise = Promise.race([ promise_obj,
     new Promise( function(resolve, reject) {
@@ -228,9 +228,9 @@ async function wait__(promise_obj, wait) {
   
   setTimeout(()=>abort_fn(),wait);
   return abortable_promise;
-}
+};
 
-async function recycleDataStore() {
+const recycleDataStore = async function() {
   let now = getSecondTm();
   let range = IDBKeyRange.lowerBound(86400-now);  // 1 days ago
   let range2 = IDBKeyRange.lowerBound(5184000-now);  // 60 days ago
@@ -249,9 +249,9 @@ async function recycleDataStore() {
   
   items = await db.getAllFromIndex('recent_cards','expired',range);
   items.forEach( item => db.delete('recent_cards',[item.host,item.flag,item.child]) ); // not await
-}
+};
 
-function _renewCryptoHost(db, accInfo, now) {
+const _renewCryptoHost = function(db, accInfo, now) {
   // default fetch timeout is indicated by the browser, chrome is 300s, firefox is 90s
   wait__(fetch(REAL_MANAGER.csp_selector),15000).then(res => res.json()).then( res2 => {
     if (res2 instanceof Array && res2.length) {
@@ -260,9 +260,9 @@ function _renewCryptoHost(db, accInfo, now) {
       db.put('config',accInfo);
     }
   });
-}
+};
 
-async function checkCryptoHost() {
+const checkCryptoHost = async function() {
   let db = await wallet_db;
   let accInfo = await db.get('config','account');
   if (accInfo) {
@@ -270,7 +270,7 @@ async function checkCryptoHost() {
     if (!accInfo.csp_list || now - (accInfo.csp_list_tm||0) > 259200) // need renew, 259200 is 3 days
       _renewCryptoHost(db,accInfo,now);  // no wait
   }
-}
+};
 
 //----
 
@@ -280,7 +280,7 @@ const _NUMB_CHAR  = '0123456789';
 const _RSVD_SIZE  = 3;
 const _CHANGE_CHAR_NUM = 1;   // 1 or 2
 
-function _matchRsvdWord(rsvd, rsvd2) {
+const _matchRsvdWord = function(rsvd, rsvd2) {
   let n = rsvd2.length;
   if (n == rsvd.length) {
     let counter = 0;
@@ -292,9 +292,9 @@ function _matchRsvdWord(rsvd, rsvd2) {
       return true;
   }
   return false;
-}
+};
 
-function _genRsvdList(rsvd) {  // rsvd should be base36 format
+const _genRsvdList = function(rsvd) {  // rsvd should be base36 format
   let s = rsvd.slice(0,5);
   if (s.length < 3) s = ('000' + s).slice(-3);
   let inLen = s.length;  // min 3 char, max 5 char
@@ -351,7 +351,7 @@ function _genRsvdList(rsvd) {  // rsvd should be base36 format
     }
     return ret;
   }
-}
+};
 
 //----
 
@@ -360,7 +360,7 @@ const session_periods = [360,900,1800,3600,10800,28800,86400,604800];
 // 30m, 90m, 5h, 10h, 24h, 3d, 7d, 63d
 const refresh_periods = [1800,5400,18000,36000,86400,259200,604800,5443200];  
 
-function configCheckBip(psw, accInfo) {
+const configCheckBip = function(psw, accInfo) {
   try {
     let fixKey = gen_fix_key(accInfo.phone,psw);
     let secret = decryptMsg(enhanceFixKey(fixKey),accInfo.hosting_data);
@@ -380,9 +380,9 @@ function configCheckBip(psw, accInfo) {
     rootBip.disableBip();
     return null;
   }
-}
+};
 
-function verifyAccoutPass(psw, accInfo) {
+const verifyAccoutPass = function(psw, accInfo) {
   if (!rootBip.hasInit() || !accInfo) return false;
   
   try {
@@ -402,9 +402,9 @@ function verifyAccoutPass(psw, accInfo) {
     console.log(e);
     return false;
   }
-}
+};
 
-async function passNalAuth(db, targHost, targRealm) {
+const passNalAuth = async function(db, targHost, targRealm) {
   // step 1: get record from wait_sign and config of target host
   let info = await db.get('wait_sign',targHost);
   let cfg2 = await db.get('config',targHost);
@@ -446,9 +446,9 @@ async function passNalAuth(db, targHost, targRealm) {
   // else, nothing to sign
   
   return 'OK';
-}
+};
 
-function safeCheckCard(flag, children, prefix, content) {
+const safeCheckCard = function(flag, children, prefix, content) {
   let child2 = null, child3 = null, isGNCD = children.length == 3;
   let child1 = children[0] & 0x7fffffff;  // take meta-pspt as generic-pspt
   if (isGNCD) {
@@ -526,31 +526,31 @@ function safeCheckCard(flag, children, prefix, content) {
     }
     return [targPubkey.toString('hex'),expired.readUInt32BE(0),role];
   }
-}
+};
 
 //----
 
 const ZERO = Buffer.alloc(1,0);
 const EMPTY_STR32 = Buffer.alloc(32,0);
 
-function _toDER(x) {
+const _toDER = function(x) {
   let i = 0;
   while (x[i] === 0) ++i;
   if (i === x.length) return ZERO;
   x = x.slice(i);
   if (x[0] & 0x80) return Buffer.concat([ZERO,x],1+x.length);
   return x;
-}
+};
 
-function _fromDER(x) {
+const _fromDER = function(x) {
   if (x[0] === 0x00) x = x.slice(1);
   const buffer = Buffer.alloc(32,0);
   const bstart = Math.max(0,32-x.length);
   x.copy(buffer,bstart);
   return buffer;
-}
+};
 
-function signDer(bip, hash) {
+const signDer = function(bip, hash) {
   const priv = bip.privateKey;
   if (!priv) throw new Error('Missing private key');
   
@@ -558,30 +558,30 @@ function signDer(bip, hash) {
   const r = _toDER(sig.slice(0, 32));
   const s = _toDER(sig.slice(32, 64));
   return bip66.encode(r,s);
-}
+};
 
-function verifyDer(bip, hash, sig) {
+const verifyDer = function(bip, hash, sig) {
   const decoded = bip66.decode(sig);
   const r = _fromDER(decoded.r);
   const s = _fromDER(decoded.s);
   return bip.verify(hash,Buffer.concat([r,s],64));
-}
+};
 
-function figerprintOf(pubkey) {
+const figerprintOf = function(pubkey) {
   let tmp = CreateHash('sha256').update(pubkey).digest();
   tmp = CreateHash('ripemd160').update(tmp).digest().slice(0,4);
   return parseInt(tmp.toString('hex'),16);
-}
+};
 
-function hash256_d(s) { // make double hash, s is utf-8 string or Buffer
+const hash256_d = function(s) { // make double hash, s is utf-8 string or Buffer
   if (!(s instanceof Buffer)) {
     if (typeof s != 'string') s = s + '';
     s = Buffer.from(s); // load as utf-8
   }
   return CreateHash('sha256').update(CreateHash('sha256').update(s).digest()).digest();
-}
+};
 
-function b36checkEncode(payload, prefix) {
+const b36checkEncode = function(payload, prefix) {
   if (!prefix) prefix = 'rid1';
   
   let ha = ripemdHash(payload);
@@ -589,14 +589,14 @@ function b36checkEncode(payload, prefix) {
   code4 = CreateHash('sha256').update(code4).digest().slice(0,4); // double hash256
   
   return prefix + base36.encode(Buffer.concat([ha,code4]));
-}
+};
 
 const is_array = function(v) { 
   return v && typeof v === 'object' && typeof v.length === 'number' && 
     typeof v.splice === 'function' && !(v.propertyIsEnumerable('length')); 
 };
 
-function ber_encode(buf, off, tag, arg, fmt) {
+const ber_encode = function(buf, off, tag, arg, fmt) {
   let inBuf, tp = typeof arg;
   if (tp == 'number') {  // take arg as int32
     off = buf.writeUInt8(tag,off);
@@ -634,9 +634,9 @@ function ber_encode(buf, off, tag, arg, fmt) {
   
   inBuf.copy(buf,off,0,len);
   return off + len;
-}
+};
 
-function gen_ecdh_key(pubkey33, re_gen) {
+const gen_ecdh_key = function(pubkey33, re_gen) {
   if (re_gen) ECDH.generateKeys();
   
   let pubKeyPoint = ECDH.getPublicKey();
@@ -644,9 +644,9 @@ function gen_ecdh_key(pubkey33, re_gen) {
   let flag = pubKeyPoint[64] & 0x01;
   let targ_x = ECDH.computeSecret(pubkey33);
   return [flag, nonce_x, targ_x];
-}
+};
 
-function scanCardTag(card, tag) {
+const scanCardTag = function(card, tag) {
   let off = 4, n = card.length;
   while (off < n) {
     let t = card[off], len = card[off+1];
@@ -654,9 +654,9 @@ function scanCardTag(card, tag) {
     off += (2+len);
   }
   return null;  // not found
-}
+};
 
-async function findGreenCard(db, host, pubkey) {
+const findGreenCard = async function(db, host, pubkey) {
   let now = getSecondTm();
   let range = IDBKeyRange.bound([host,0-now-1209600],[host,0-now-3600]); // 1209600 is 14 days
   let items = await db.getAllFromIndex('recent_cards','host_expired',range,64);
@@ -667,16 +667,16 @@ async function findGreenCard(db, host, pubkey) {
       return item.child;
   }
   return null;
-}
+};
 
-function getRsvdCode(phone, psw) {
+const getRsvdCode = function(phone, psw) {
   let rsvdSour = Buffer.from('LOGIN:'+phone+':'+psw);
   let ha = CreateHash('sha256').update(rsvdSour).digest();
   ha = CreateHash('sha256').update(ha).digest();
   return base36.encode(ha).slice(0 - _RSVD_SIZE);
-}
+};
 
-function BipAccount() {
+const rootBip = (function() {
   // we hide some variables here, avoid leaking out by console.log()
   let phone = null, figerprint = null, rsvdCode = '';
   let alternate_no = null, alternate_off = 0;
@@ -982,24 +982,22 @@ function BipAccount() {
       return '';
     },
   };
-}
-
-const rootBip = BipAccount();
+})();
 
 //----
 
-function _getHost(sender) {
+const _getHost = function(sender) {
   let host = sender.origin.split('://')[1] || '';
   // if (host == 'localhost:9000') host = NAL_WEBHOST;  // for NAL debugging
   return host;
-}
+};
 
-async function _waitReturn(ret, tm) {
+const _waitReturn = async function(ret, tm) {
   let waitable = new Promise( function(resolve, reject) {
     setTimeout(() => resolve(ret),tm || 2000);  // default wait 2 seconds
   });
   return await waitable;
-}
+};
 
 const DEFAULT_REAL_SERVER = 'www.fn-share.com';
 const DEFAULT_REAL_MANAGER = { type:'',
@@ -1041,7 +1039,7 @@ const URL_SECRET = ((fixed_secret) => {
 
 let _fetchGncdErrNum = 0;
 
-function newGncdPromise(host, role, url, info) {
+const newGncdPromise = function(host, role, url, info) {
   let ret = 'NETWORK_ERROR';
   let cipher = info[6];  // cipher is hex string
   
@@ -1078,9 +1076,9 @@ function newGncdPromise(host, role, url, info) {
     
     return ret;
   });
-}
+};
 
-async function requestGncd(host, role, db, accInfo, now, adminPub, expireMins, card, suggestChild, cspList) {
+const requestGncd = async function(host, role, db, accInfo, now, adminPub, expireMins, card, suggestChild, cspList) {
   let opt = REAL_MANAGER.option || {};
   let optStyle = opt.style || 'ONE';  // 'ONE' or 'MANY'
   let optRenewAfter = opt.renew_after || 2;  // try renew csp_list when meet N failed request
@@ -1089,10 +1087,10 @@ async function requestGncd(host, role, db, accInfo, now, adminPub, expireMins, c
   let num = cspList.length;
   if (num == 0) return 'SYSTEM_ERROR';
   
-  let cspSites = [];
+  let cspSites;
   if (optStyle == 'ONE')
-    cspSites.push(cspList[Math.floor(Math.random()*num)]);
-  else cspSites = cspList.slice(0,Math.min(num,3));   // cspList.length is 1,2,3
+    cspSites = [cspList[Math.floor(Math.random()*num)]];
+  else cspSites = cspList.slice(0,Math.min(num,4));   // cspList.length can be 1,2,3,4
   
   let child2 = Math.floor(Math.random()*0x7fffffff) + 1;
   let child3 = Math.floor(Math.random()*0x7fffffff) + 1; 
@@ -1115,73 +1113,107 @@ async function requestGncd(host, role, db, accInfo, now, adminPub, expireMins, c
     promises.push(newGncdPromise(host,role,url,info));
   }
   
-  let abort_fn = null, timePromise = new Promise( function(resolve, reject) {
-    abort_fn = function() { reject(new Error('TIMEOUT')) };
-  });
-  let topPromise = promises.length <= 2? Promise.race([...promises,timePromise]):
-    Promise.race([Promise.all(promises),timePromise]);
-  setTimeout(()=>abort_fn(),20000);  // max wait 20 seconds
+  let topPromise;
+  if (promises.length >= 3) {  // 3 or 4 cps sites
+    promises.forEach((item,idx) => promises[idx] = wait__(item,20000)); // max wait 20 seconds
+    topPromise = Promise.allSettled(promises);
+  }
+  else { // race 1 or 2 cps sites before timeout
+    let abort_fn = null, timePromise = new Promise( function(resolve, reject) {
+      abort_fn = function() { reject(new Error('TIMEOUT')) };
+    });
+    topPromise = Promise.race([...promises,timePromise]);
+    setTimeout(()=>abort_fn(),20000);  // max wait 20 seconds
+  }
   
   return await topPromise.then( res => {
-    if (res instanceof Array) {
-      let item, items = [];
+    let item, items = [];
+    if (res instanceof Array) {     // fetch 3 or 4 csp result
       for (let i=0; item=res[i]; i++) {
+        if (item.status == 'fulfilled')
+          item = item.value;
+        else item = 'REQUEST_FAIL'; // item.status is 'rejected', item.reason is reject value
+        
         if (typeof item == 'string') {
           if (item === 'REQUEST_FAIL' || item === 'NETWORK_ERROR')
             _fetchGncdErrNum += 1;
         }
-        else if (typeof item.card_record == 'object')
+        else if (item && item.card_record)
           items.push(item);
       }
+    }
+    else if (res && res.card_record)
+      items.push(res);
+    else return 'REQUEST_FAIL';
+    
+    if (items.length >= 3) {  // have 3 or 4 success result
+      let card0 = (items[0].card_record.card || '').slice(0,-132); // remove TAG_SIGNATURE hex string
+      let card1 = (items[1].card_record.card || '').slice(0,-132);
+      let card2 = (items[2].card_record.card || '').slice(0,-132);
       
-      if (items.length >= 3) {
-        let card0 = (items[0].card_record.card || '').slice(0,-132); // remove TAG_SIGNATURE hex string
-        let card1 = (items[1].card_record.card || '').slice(0,-132);
-        let card2 = (items[2].card_record.card || '').slice(0,-132);
-        let errIdx = -1;
-        if (card0 && card0 == card1) {
-          if (card1 == card2)
-            item = items[0];
-          else errIdx = 2;
-        }
-        else if (card0 && card0 == card2) {
+      let errIdx = -1;
+      if (card0 && card0 == card1) {
+        if (card1 == card2)
           item = items[0];
-          errIdx = 1;
-        }
-        else if (card1 && card1 == card2) {
-          item = items[1];
-          errIdx = 0;
-        }
-        else return 'REQUEST_FAIL';  // card0 != card1 && card0 != card2 && card1 != card2
-        
-        if (errIdx >= 0 && optReportError) {
-          let errItem = items[errIdx];
-          if (errItem.card_record.card) {  // report error
-            let url = 'https://' + (accInfo.real_sp || DEFAULT_REAL_SERVER) + '/rsp/report_error';
-            let option = {method:'POST',body:JSON.stringify(errItem.card_record),referrerPolicy:'no-referrer'};
-            wait__(fetch(url,option),20000).catch(e => null);  // no await
+        else errIdx = 2;
+      }
+      else if (card0 && card0 == card2) {
+        item = items[0];
+        errIdx = 1;
+      }
+      else if (card1 && card1 == card2) {
+        item = items[1];
+        errIdx = 0;
+      }
+      else {
+        item = null;
+        let card3 = items.length >= 4? (items[3].card_record.card || '').slice(0,-132): '';
+        if (card3) {
+          if (card3 == card0) {
+            item = items[3];
+            if (card1) errIdx = 1;
+            else if (card2) errIdx = 2;
+          }
+          else if (card3 == card1) {
+            item = items[3];
+            if (card0) errIdx = 0;
+            else if (card2) errIdx = 2;
+          }
+          else if (card3 == card2) {
+            item = items[3];
+            if (card0) errIdx = 0;
+            else if (card1) errIdx = 1;
           }
         }
-      }
-      else if (items.length >= 1) {
-        item = items[0];
-      }
-      else return 'REQUEST_FAIL';
-      
-      let cardRec = item.card_record;
-      db.put('recent_cards',cardRec); // no waiting
-      
-      if (_fetchGncdErrNum >= optRenewAfter) {
-        _fetchGncdErrNum = 0;
-        _renewCryptoHost(db,accInfo,now);
+        if (item === null) return 'REQUEST_FAIL';  // no two-same-card exists
       }
       
-      delete item.card_record;
-      return item;
+      if (errIdx >= 0 && optReportError) {
+        let errItem = items[errIdx];
+        if (errItem.card_record.card) {  // report error
+          let url = 'https://' + (accInfo.real_sp || DEFAULT_REAL_SERVER) + '/rsp/report_error';
+          let option = {method:'POST',body:JSON.stringify(errItem.card_record),referrerPolicy:'no-referrer'};
+          wait__(fetch(url,option),20000).catch(e => null);  // no await
+        }
+      }
+    }
+    else if (items.length >= 1) { // have one or two result
+      item = items[0];
     }
     else return 'REQUEST_FAIL';
+    
+    let cardRec = item.card_record;
+    db.put('recent_cards',cardRec);  // save result to DB, no waiting
+    
+    if (_fetchGncdErrNum >= optRenewAfter) {
+      _fetchGncdErrNum = 0;
+      _renewCryptoHost(db,accInfo,now);
+    }
+    
+    delete item.card_record;
+    return item;
   }).catch(e => 'NETWORK_ERROR');
-}
+};
 
 const _rpc_func = {
   async ver_info(request, sender) {
@@ -1789,7 +1821,6 @@ const _rpc_func = {
         }
         
         ret = await requestGncd(host,role,db,accInfo,now,adminPub,expireMins,card,suggestChild,cspList);
-        console.log('here fetch gncd:',ret);
       }
     }
     
@@ -2487,7 +2518,7 @@ const _rpc_func = {
     
     return {result:ret};
   },
-}
+};
 
 chrome.runtime.onMessage.addListener( (request,sender,sendResponse) => {
   if (typeof request == 'string') request = JSON.parse(request);
