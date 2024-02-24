@@ -407,7 +407,8 @@ const _NAL = {
     return sw_channel_.host || '';
   },
   
-  strategyVer() {
+  strategyVer(newVer) {
+    if (typeof newVer == 'number') sw_channel_.strategy_ver = newVer;
     return sw_channel_.strategy_ver;  // null means not ready
   },
   
