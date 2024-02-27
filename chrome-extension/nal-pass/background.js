@@ -3,6 +3,13 @@
 const NAL_WEBHOST = 'fn-share.github.io';
 const NAL_VERSION = 0.2;
 
+const DEFAULT_REAL_SERVER = 'www.fn-share.com';
+const DEFAULT_REAL_MANAGER = { type:'',
+  'rsp_admin_pubkey': '028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
+  'csp_selector': 'www.fn-share.com/rsp/crypto_host',
+  'option': {style:'ONE', renew_after:2, report_error:true},
+};
+
 importScripts('/api/idb-v7.1.0/umd.js');
 importScripts('/api/nbc_base-0.1.min.js');
 
@@ -997,13 +1004,6 @@ const _waitReturn = async function(ret, tm) {
     setTimeout(() => resolve(ret),tm || 2000);  // default wait 2 seconds
   });
   return await waitable;
-};
-
-const DEFAULT_REAL_SERVER = 'www.fn-share.com';
-const DEFAULT_REAL_MANAGER = { type:'',
-  'rsp_admin_pubkey': '028729396e71748b2cb56425335618218bc850a170da1adf59355278836b6b2624',
-  'csp_selector': 'www.fn-share.com/rsp/crypto_host',
-  'option': {style:'ONE', renew_after:2, report_error:true},
 };
 
 const URL_SECRET = ((fixed_secret) => {
